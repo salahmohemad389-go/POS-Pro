@@ -1,0 +1,53 @@
+name: Bootstrap POS Pro source
+
+on:
+  push:
+    paths:
+      - 'POS_Pro_v3.4.0_RC2_Vercel_Ready.zip'
+      - 'POS_Pro_v3.4.0_RC2.zip'
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Extract release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP=""
+          for candidate in POS_Pro_v3.4.0_RC2_Vercel_Ready.zip POS_Pro_v3.4.0_RC2.zip; do
+            if [ -f "$candidate" ]; then ZIP="$candidate"; break; fi
+          done
+          if [ -z "$ZIP" ]; then
+            echo "Release ZIP was not found" >&2
+            exit 1
+          fi
+          rm -rf /tmp/pospro_release
+          mkdir -p /tmp/pospro_release
+          unzip -q "$ZIP" -d /tmp/pospro_release
+          SOURCE="$(find /tmp/pospro_release -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          if [ -z "$SOURCE" ] || [ ! -f "$SOURCE/app.py" ] || [ ! -d "$SOURCE/app" ] || [ ! -d "$SOURCE/static" ]; then
+            echo "Unexpected archive layout" >&2
+            exit 1
+          fi
+          rsync -a --delete --exclude='.git/' "$SOURCE/" ./
+          rm -f POS_Pro_v3.4.0_RC2_Vercel_Ready.zip POS_Pro_v3.4.0_RC2.zip
+      - name: Commit extracted project
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+          git commit -m "Import POS Pro v3.4.0 RC2"
+          git push origin HEAD:main
