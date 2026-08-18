@@ -53,7 +53,17 @@ IS_PRODUCTION = POS_ENV == "production"
 # Database
 POS_DATABASE_URL = _env_text("POS_DATABASE_URL")
 IS_SQLITE = not POS_DATABASE_URL or POS_DATABASE_URL.startswith("sqlite:")
-DATABASE_URL = f"sqlite:///{DB_PATH}" if IS_SQLITE and not POS_DATABASE_URL else POS_DATABASE_URL
+if IS_SQLITE:
+    DATABASE_URL = f"sqlite:///{DB_PATH}" if not POS_DATABASE_URL else POS_DATABASE_URL
+else:
+    # Neon/Vercel commonly injects a generic postgresql:// URL. SQLAlchemy maps
+    # that to psycopg2 by default, but POS Pro ships psycopg v3. Explicitly use
+    # the psycopg driver so Vercel does not require psycopg2.
+    DATABASE_URL = (
+        "postgresql+psycopg://" + POS_DATABASE_URL[len("postgresql://"):]
+        if POS_DATABASE_URL.startswith("postgresql://")
+        else POS_DATABASE_URL
+    )
 
 if IS_PRODUCTION and IS_SQLITE:
     raise RuntimeError("Production deployment requires POS_DATABASE_URL pointing to PostgreSQL; SQLite is development-only")
