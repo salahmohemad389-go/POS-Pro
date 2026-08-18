@@ -1,27 +1,19 @@
-# Python
+.env
+.venv/
+venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.venv/
-venv/
-
-# Environment / secrets
-.env
-.env.*
-!.env.example
-
-# Runtime data
 runtime/
+data/
+backups/
 *.db
 *.sqlite
 *.sqlite3
-backups/
-
-# Vercel
-.vercel/
-
-# OS / editors
+*.log
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+.vercel/
+*.zip
