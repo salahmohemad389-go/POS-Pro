@@ -1,8 +1,13 @@
 from pathlib import Path
 from types import SimpleNamespace
+import sys
 
 import pytest
 from fastapi import HTTPException
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from app.api.routes.settings import _validate_ui_payload
 from app.services.pdf_renderer import generate_invoice_pdf
@@ -46,7 +51,7 @@ def _invoice(**overrides):
 
 
 def test_dynamic_invoice_pdf_is_real_pdf():
-    font_dir = Path(__file__).resolve().parents[1] / "static" / "assets" / "fonts"
+    font_dir = ROOT / "static" / "assets" / "fonts"
     settings = {
         "store_name": "متجر الاختبار",
         "tagline": "",
@@ -64,7 +69,7 @@ def test_dynamic_invoice_pdf_is_real_pdf():
 
 
 def test_dynamic_invoice_pdf_handles_optional_total_boxes():
-    font_dir = Path(__file__).resolve().parents[1] / "static" / "assets" / "fonts"
+    font_dir = ROOT / "static" / "assets" / "fonts"
     settings = {"store_name": "POS", "logo": "", "currency": "ج.م"}
     paid_pdf = generate_invoice_pdf(_invoice(discount=0, discount_pct=0, remaining=0), settings, font_dir)
     due_pdf = generate_invoice_pdf(_invoice(discount=5, discount_pct=10, total=45, paid=20, remaining=25), settings, font_dir)
