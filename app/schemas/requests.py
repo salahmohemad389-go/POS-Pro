@@ -55,6 +55,7 @@ class SettingsSave(CleanModel):
     auto_print_after_sale: StrictBool | None = None
     feature_reports_enabled: StrictBool | None = None
     feature_suppliers_enabled: StrictBool | None = None
+    ui_config: dict[str, object] | None = None
 
     @field_validator("logo")
     @classmethod
@@ -121,6 +122,7 @@ class ReturnCreate(CleanModel):
     paid: float | None = Field(default=None, ge=0, le=999999999.99)
     notes: str = Field(default="", max_length=1000)
 
+
 class LoginRequest(CleanModel):
     login: str = Field(min_length=1, max_length=80)
     password: str = Field(min_length=1, max_length=1024)
@@ -161,6 +163,7 @@ class CustomerSave(CleanModel):
     phone: str = Field(default="", max_length=40)
     notes: str = Field(default="", max_length=4000)
 
+
 class SupplierSave(CleanModel):
     id: int | None = Field(default=None, ge=1)
     name: str = Field(min_length=1, max_length=200)
@@ -168,6 +171,7 @@ class SupplierSave(CleanModel):
     email: str = Field(default="", max_length=120)
     address: str = Field(default="", max_length=4000)
     notes: str = Field(default="", max_length=4000)
+
 
 class BackupRestore(CleanModel):
     name: str = Field(min_length=1, max_length=255, pattern=r"^backup_[A-Za-z0-9_.-]+\.zip$")
