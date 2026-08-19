@@ -53,10 +53,11 @@ def test_server_owns_invoice_totals_frontend_sends_minimal_payload():
 
 
 def test_vercel_and_ci_files_are_safe_and_present():
-    assert (ROOT / "app.py").exists()
+    assert (ROOT / "server.py").exists()
+    assert not (ROOT / "app.py").exists()
     assert (ROOT / ".python-version").read_text().strip() == "3.12"
     conf = json.loads((ROOT / "vercel.json").read_text())
-    assert "tests/**" in conf["functions"]["app.py"]["excludeFiles"]
+    assert "tests/**" in conf["functions"]["server.py"]["excludeFiles"]
     assert (ROOT / ".github" / "workflows" / "ci.yml").exists()
     gitignore = (ROOT / ".gitignore").read_text()
     for required in (".env", "runtime/", "*.db", ".vercel/"):
