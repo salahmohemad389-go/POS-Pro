@@ -1,0 +1,48 @@
+name: Export Source Snapshot
+
+on:
+  push:
+    branches:
+      - snapshot-export-9e911c4
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact production source
+        uses: actions/checkout@v4
+        with:
+          ref: 9e911c4f06d6acff9a678d19962e720aee8f6d3f
+
+      - name: Create clean source ZIP
+        shell: python
+        run: |
+          from pathlib import Path
+          import zipfile
+
+          root = Path('.')
+          output = Path('POS-Pro_9e911c4_Source.zip')
+          excluded_parts = {'.git', '__pycache__', '.pytest_cache'}
+
+          with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as zf:
+              for path in sorted(root.rglob('*')):
+                  if not path.is_file() or path == output:
+                      continue
+                  if any(part in excluded_parts for part in path.parts):
+                      continue
+                  if path.suffix == '.pyc':
+                      continue
+                  zf.write(path, Path('POS-Pro') / path)
+
+          print(f'Created {output} ({output.stat().st_size} bytes)')
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: POS-Pro-9e911c4-Source
+          path: POS-Pro_9e911c4_Source.zip
+          if-no-files-found: error
+          retention-days: 1
