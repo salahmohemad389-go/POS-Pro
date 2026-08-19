@@ -24,6 +24,14 @@ async def root():
     reads or sends form values, cookies, or credentials.
     """
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    # The first production account accepts the conventional ``admin`` alias.
+    # Prefill it as a real value so the placeholder cannot be mistaken for an
+    # already-entered username on mobile browsers.
+    html = html.replace(
+        'id="loginUser" placeholder="admin"',
+        'id="loginUser" value="admin" placeholder="admin"',
+        1,
+    )
     marker = '<script type="module" src="/static/app.js"></script>'
     diagnostic = '<script src="/static/client_diag.js" defer></script>\n' + marker
     if marker in html:
