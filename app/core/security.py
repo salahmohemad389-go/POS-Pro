@@ -141,6 +141,12 @@ def get_current_user(request: Request, authorization: Optional[str] = Header(Non
     user = db.query(User).filter(User.id == int(payload["sub"])).first()
     if not user or not user.active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "مستخدم غير موجود")
+    expires_at = getattr(user, "expires_at", None)
+    if expires_at is not None:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if expires_at <= now:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "انتهت صلاحية هذا الحساب")
     if int(payload.get("ver", 0)) != int(getattr(user, "token_version", 0) or 0):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "تم إلغاء هذه الجلسة")
     return user

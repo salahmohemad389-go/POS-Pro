@@ -17,7 +17,7 @@ from app.db.session import get_db
 from app.core.security import get_current_user
 from app.db.models import User
 from app.services.audit_service import log_audit
-from app.services.import_service import import_products as do_import, export_products, write_csv, write_xlsx
+from app.services.import_service import import_products as do_import, update_product_prices as do_price_update, export_products, write_csv, write_xlsx
 from app.schemas.requests import ProductSave, ProductFind
 from app.utils.helpers import money_n, r2, r3, record_stock_movement
 
@@ -41,6 +41,8 @@ async def list_products(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if not has_permission(user, "product_view"):
+        raise HTTPException(403, "لا تملك صلاحية عرض المنتجات")
     query = db.query(Product)
     if category_id:
         query = query.filter(Product.category_id == category_id)
@@ -50,8 +52,6 @@ async def list_products(
         like = f"%{raw}%"
         starts = f"{raw}%"
         query = query.filter(or_(Product.name.ilike(like), Product.barcode.ilike(like), Product.code.ilike(like)))
-        # Cashier-friendly relevance: exact barcode/code first, then exact name,
-        # name prefix, then generic substring matches. Stable name/id tie-breakers.
         search_rank = case(
             (or_(Product.barcode == raw, Product.code == raw), 0),
             (Product.name.ilike(raw), 1),
@@ -69,6 +69,8 @@ async def list_products(
 
 @router.get("/by-barcode/{barcode}")
 async def product_by_barcode(barcode: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not has_permission(user, "product_view"):
+        raise HTTPException(403, "لا تملك صلاحية عرض المنتجات")
     if barcode is None:
         return None
     raw = str(barcode).strip()
@@ -84,6 +86,8 @@ async def product_by_barcode(barcode: str, user: User = Depends(get_current_user
 
 @router.post("/find")
 async def product_find(payload: ProductFind, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not has_permission(user, "product_view"):
+        raise HTTPException(403, "لا تملك صلاحية عرض المنتجات")
     q = payload.q.strip()
     if not q:
         return {"matches": [], "exact": None}
@@ -192,8 +196,31 @@ async def export_products_endpoint(request: Request, format: str = "xlsx", user:
     return FileResponse(str(path), media_type=media_type, filename=filename, headers={"Content-Disposition": f'attachment; filename="{filename}"'}, background=cleanup)
 
 
+@router.post("/import-prices")
+async def update_product_prices_endpoint(request: Request, file: UploadFile = File(...), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not has_permission(user, "product_import"):
+        raise HTTPException(403, "لا تملك صلاحية")
+    _rate_limit_or_403(f"product_price_import:{user.id}", "write")
+    filename = (file.filename or "").lower()
+    if not filename:
+        raise HTTPException(400, "اسم الملف مطلوب")
+    raw = await file.read()
+    result = do_price_update(db, raw, filename)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "فشل تحديث الأسعار")
+    try:
+        log_audit(db, user, "products_price_update", f"تحديث أسعار {result['updated']} منتج من {filename}", request.client.host if request else None, commit=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(500, "تعذر حفظ تحديث الأسعار بأمان")
+    return result
+
+
 @router.get("/{pid}")
 async def get_product(pid: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not has_permission(user, "product_view"):
+        raise HTTPException(403, "لا تملك صلاحية عرض المنتجات")
     p = db.query(Product).filter(Product.id == pid).first()
     if not p:
         raise HTTPException(404, "منتج غير موجود")

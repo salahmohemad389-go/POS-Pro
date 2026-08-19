@@ -49,8 +49,17 @@ def _auto_migrate():
         migrations.append(
             "CREATE TABLE app_counters (name VARCHAR(80) PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0)"
         )
-    if _table_exists("users") and not _table_has_column("users", "token_version"):
-        migrations.append("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0 NOT NULL")
+    if _table_exists("users"):
+        if not _table_has_column("users", "token_version"):
+            migrations.append("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0 NOT NULL")
+        user_columns = [
+            ("permissions", "ALTER TABLE users ADD COLUMN permissions " + ("TEXT" if engine.dialect.name == "sqlite" else "JSON")),
+            ("expires_at", "ALTER TABLE users ADD COLUMN expires_at TIMESTAMP"),
+            ("is_owner", f"ALTER TABLE users ADD COLUMN is_owner BOOLEAN DEFAULT {'0' if engine.dialect.name == 'sqlite' else 'FALSE'} NOT NULL"),
+        ]
+        for col_name, sql in user_columns:
+            if not _table_has_column("users", col_name):
+                migrations.append(sql)
 
     if _table_exists("settings"):
         for col_name, sql in [
@@ -66,6 +75,8 @@ def _auto_migrate():
             ("terms_conditions", "ALTER TABLE settings ADD COLUMN terms_conditions TEXT DEFAULT ''"),
             ("warranty_text", "ALTER TABLE settings ADD COLUMN warranty_text VARCHAR(300) DEFAULT ''"),
             ("max_items_per_page", "ALTER TABLE settings ADD COLUMN max_items_per_page INTEGER DEFAULT 15"),
+            ("feature_reports_enabled", f"ALTER TABLE settings ADD COLUMN feature_reports_enabled BOOLEAN DEFAULT {'1' if engine.dialect.name == 'sqlite' else 'TRUE'} NOT NULL"),
+            ("feature_suppliers_enabled", f"ALTER TABLE settings ADD COLUMN feature_suppliers_enabled BOOLEAN DEFAULT {'1' if engine.dialect.name == 'sqlite' else 'TRUE'} NOT NULL"),
         ]:
             if not _table_has_column("settings", col_name):
                 migrations.append(sql)
@@ -287,8 +298,15 @@ def _init_db_unlocked():
                     login=POS_ADMIN_LOGIN,
                     password_hash=hash_password(admin_password),
                     role="admin",
+                    is_owner=True,
                 )
             )
+        # Existing installations predate the owner flag. Promote only the
+        # earliest admin once; secondary admins must never become owners implicitly.
+        if not db.query(User).filter(User.is_owner.is_(True)).first():
+            first_admin = db.query(User).filter(User.role == "admin").order_by(User.id.asc()).first()
+            if first_admin:
+                first_admin.is_owner = True
         db.commit()
     finally:
         db.close()

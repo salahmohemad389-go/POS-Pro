@@ -27,6 +27,8 @@ def _rate_limit_or_403(key: str, limit_type: str):
 
 @router.get("")
 async def list_categories(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not has_permission(user, "category_view"):
+        raise HTTPException(403, "لا تملك صلاحية عرض الأقسام")
     cached_data = cache_get("categories")
     if cached_data is not None:
         return cached_data
@@ -60,7 +62,6 @@ async def save_category(payload: CategorySave, request: Request, user: User = De
         parent = db.query(Category).filter(Category.id == int(parent_id)).first()
         if not parent:
             raise HTTPException(400, "القسم الأب غير موجود")
-        # Prevent cycles when moving an existing node under one of its descendants.
         cursor = parent
         seen = set()
         while cursor and cursor.id not in seen:

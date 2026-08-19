@@ -50,6 +50,8 @@ def get_settings_cached(db: Session) -> dict[str, Any]:
         "terms_conditions": s.terms_conditions or "",
         "warranty_text": s.warranty_text or "",
         "max_items_per_page": s.max_items_per_page or 15,
+        "feature_reports_enabled": bool(getattr(s, "feature_reports_enabled", True)),
+        "feature_suppliers_enabled": bool(getattr(s, "feature_suppliers_enabled", True)),
         "_ts": now,
     }
     return {k: v for k, v in _CACHE.items() if not k.startswith("_")}

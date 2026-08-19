@@ -6,8 +6,12 @@ import base64
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Request, Response as FastAPIResponse
+from fastapi import APIRouter, Depends, Request, Response as FastAPIResponse
 from fastapi.responses import FileResponse, HTMLResponse, Response
+from sqlalchemy.orm import Session
+
+from app.db.session import get_db
+from app.services.setting_service import get_settings_cached
 
 STATIC_DIR = Path(__file__).resolve().parent.parent.parent.parent / "static"
 
@@ -24,19 +28,28 @@ async def root():
     reads or sends form values, cookies, or credentials.
     """
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-    # The first production account accepts the conventional ``admin`` alias.
-    # Prefill it as a real value so the placeholder cannot be mistaken for an
-    # already-entered username on mobile browsers.
-    html = html.replace(
-        'id="loginUser" placeholder="admin"',
-        'id="loginUser" value="admin" placeholder="admin"',
-        1,
-    )
+    if '</head>' in html:
+        html = html.replace('</head>', '<link rel="stylesheet" href="/static/css/upgrade.css">\n</head>', 1)
     marker = '<script type="module" src="/static/app.js"></script>'
-    diagnostic = '<script src="/static/client_diag.js" defer></script>\n' + marker
+    shell = (
+        '<script src="/static/client_diag.js" defer></script>\n'
+        '<script src="/static/js/upgrade_dom.js"></script>\n'
+        + marker
+    )
     if marker in html:
-        html = html.replace(marker, diagnostic, 1)
+        html = html.replace(marker, shell, 1)
     return HTMLResponse(content=html)
+
+
+@router.get("/api/branding", include_in_schema=False)
+async def public_branding(db: Session = Depends(get_db)):
+    """Public, non-sensitive branding used by the login screen."""
+    settings = get_settings_cached(db)
+    return {
+        "store_name": settings.get("store_name") or "POS",
+        "tagline": settings.get("tagline") or "",
+        "logo": settings.get("logo") or "",
+    }
 
 
 @router.post("/api/client-error", include_in_schema=False)

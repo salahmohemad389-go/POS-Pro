@@ -64,6 +64,9 @@ class User(Base):
     role = Column(String(20), nullable=False, default="cashier")
     active = Column(Boolean, default=True)
     token_version = Column(Integer, default=0, nullable=False)
+    permissions = Column(JSON, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    is_owner = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=_utcnow)
 
 
@@ -94,6 +97,8 @@ class Setting(Base):
     header_note = Column(String(200), default="")
     terms_conditions = Column(Text, default="")
     warranty_text = Column(String(300), default="")
+    feature_reports_enabled = Column(Boolean, default=True, nullable=False)
+    feature_suppliers_enabled = Column(Boolean, default=True, nullable=False)
 
 
 class Supplier(Base):

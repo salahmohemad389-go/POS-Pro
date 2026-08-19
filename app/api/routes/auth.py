@@ -7,7 +7,7 @@ import hmac
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
-from app.core.permissions import PERMISSION_MATRIX, has_permission
+from app.core.permissions import PERMISSION_MATRIX, get_user_permissions
 from app.core.ratelimit import consume_attempt, record_success
 from app.core.security import create_token, get_current_user, hash_password, verify_password, password_needs_upgrade, validate_password
 from app.core.config import IS_PRODUCTION, TOKEN_EXPIRE_HOURS, POS_ADMIN_LOGIN, POS_ADMIN_PASSWORD
@@ -50,8 +50,6 @@ def _recover_first_admin_login(db: Session, login_: str, password: str) -> User 
         return None
 
     admin = admins[0]
-    # If the operator used the conventional first-login alias, keep it as the
-    # persisted login so the same credentials continue working after recovery.
     recovered_login = configured_login if submitted_login.casefold() == configured_login.casefold() else "admin"
     login_owner = db.query(User).filter(User.login == recovered_login, User.id != admin.id).first()
     if login_owner:
@@ -70,6 +68,18 @@ def _recover_first_admin_login(db: Session, login_: str, password: str) -> User 
         return None
 
 
+def _user_payload(user: User) -> dict:
+    return {
+        "id": user.id,
+        "name": user.name,
+        "role": user.role,
+        "login": user.login,
+        "is_owner": bool(getattr(user, "is_owner", False)),
+        "permissions": sorted(get_user_permissions(user)),
+        "expires_at": user.expires_at.isoformat() if getattr(user, "expires_at", None) else None,
+    }
+
+
 @router.post("/login")
 async def login(payload: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     login_ = payload.login.strip()
@@ -85,6 +95,10 @@ async def login(payload: LoginRequest, request: Request, response: Response, db:
 
     user = db.query(User).filter(User.login == login_).first()
     credentials_ok = bool(user and user.active and verify_password(password, user.password_hash))
+    if credentials_ok and getattr(user, "expires_at", None) is not None:
+        from datetime import datetime, timezone
+        if user.expires_at <= datetime.now(timezone.utc).replace(tzinfo=None):
+            raise HTTPException(403, "انتهت مدة صلاحية هذا الحساب. تواصل مع المسؤول.")
     if not credentials_ok:
         recovered = _recover_first_admin_login(db, login_, password)
         if recovered is None:
@@ -105,7 +119,7 @@ async def login(payload: LoginRequest, request: Request, response: Response, db:
         max_age=int(TOKEN_EXPIRE_HOURS * 3600), path="/",
     )
     log_audit(db, user, "login", f"دخول {user.name}", request.client.host if request else None)
-    return {"ok": True, "user": {"id": user.id, "name": user.name, "role": user.role, "login": user.login}}
+    return {"ok": True, "user": _user_payload(user)}
 
 
 @router.post("/logout")
@@ -123,7 +137,7 @@ async def logout(request: Request, response: Response, user: User = Depends(get_
 
 @router.get("/me")
 async def me(user: User = Depends(get_current_user)):
-    return {"id": user.id, "name": user.name, "role": user.role, "login": user.login}
+    return _user_payload(user)
 
 
 @router.get("/permissions")
@@ -131,8 +145,8 @@ async def get_my_permissions(user: User = Depends(get_current_user)):
     role = user.role or "cashier"
     return {
         "role": role,
-        "permissions": sorted(PERMISSION_MATRIX.get(role, frozenset())),
-        "all_roles": {r: sorted(p) for r, p in PERMISSION_MATRIX.items()} if user.role == "admin" else {},
+        "permissions": sorted(get_user_permissions(user)),
+        "all_roles": {r: sorted(p) for r, p in PERMISSION_MATRIX.items()} if getattr(user, "is_owner", False) else {},
     }
 
 
@@ -164,4 +178,4 @@ async def change_credentials(payload: ChangeCredentials, request: Request, respo
         "pos_session", token, httponly=True, secure=IS_PRODUCTION, samesite="strict",
         max_age=int(TOKEN_EXPIRE_HOURS * 3600), path="/",
     )
-    return {"ok": True, "user": {"id": user.id, "name": user.name, "role": user.role, "login": user.login}}
+    return {"ok": True, "user": _user_payload(user)}

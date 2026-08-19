@@ -1,12 +1,7 @@
 """Permission system for POS Pro.
 
-Single source of truth for role-based access control.
-All permission checks throughout the app should use has_permission().
-
-Roles:
-  admin   - Full access to everything
-  manager - All operations except user management, settings, audit clear, restore
-  cashier - POS + view own invoices + view products/customers
+Role defaults remain the baseline, while individual users may have an explicit
+permission list. The bootstrap owner account always keeps the full admin set.
 """
 
 from __future__ import annotations
@@ -17,9 +12,6 @@ if TYPE_CHECKING:
     from app.db.models import User
 
 
-# ═══════════════════════════════════════════════════
-# Permission matrix (canonical)
-# ═══════════════════════════════════════════════════
 PERMISSION_MATRIX: dict[str, frozenset[str]] = {
     "admin": frozenset([
         "pos_view",
@@ -31,7 +23,7 @@ PERMISSION_MATRIX: dict[str, frozenset[str]] = {
         "customer_delete", "customer_export",
         "category_view", "category_save", "category_delete",
         "supplier_view", "supplier_save", "supplier_delete", "supplier_export",
-        "user_view", "user_save", "delete_user",
+        "user_view", "user_save", "delete_user", "user_revoke_sessions",
         "settings_save",
         "backup_create", "backup_restore",
         "report_dashboard", "report_low_stock", "report_profit", "report_customer_debts",
@@ -61,8 +53,25 @@ PERMISSION_MATRIX: dict[str, frozenset[str]] = {
     ]),
 }
 
+ALL_PERMISSIONS = frozenset().union(*PERMISSION_MATRIX.values())
+
+
+def get_user_permissions(user: "User") -> frozenset[str]:
+    """Return the effective permissions for a user.
+
+    ``permissions`` is an optional per-user override. ``None`` means use role
+    defaults; an empty list intentionally means no permissions.
+    """
+    if bool(getattr(user, "is_owner", False)):
+        return PERMISSION_MATRIX["admin"]
+    override = getattr(user, "permissions", None)
+    if override is not None:
+        if not isinstance(override, (list, tuple, set, frozenset)):
+            return frozenset()
+        return frozenset(str(x) for x in override if str(x) in ALL_PERMISSIONS)
+    role = user.role or "cashier"
+    return PERMISSION_MATRIX.get(role, frozenset())
+
 
 def has_permission(user: "User", action: str) -> bool:
-    """Check if the given user has a specific permission."""
-    role = user.role or "cashier"
-    return action in PERMISSION_MATRIX.get(role, frozenset())
+    return action in get_user_permissions(user)

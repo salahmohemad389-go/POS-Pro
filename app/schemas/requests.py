@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
@@ -52,6 +53,8 @@ class SettingsSave(CleanModel):
     vat_enabled: StrictBool | None = None
     copies: int | None = Field(default=None, ge=1, le=10)
     auto_print_after_sale: StrictBool | None = None
+    feature_reports_enabled: StrictBool | None = None
+    feature_suppliers_enabled: StrictBool | None = None
 
     @field_validator("logo")
     @classmethod
@@ -135,6 +138,21 @@ class UserSave(CleanModel):
     login: str = Field(min_length=1, max_length=80)
     role: Literal["admin", "manager", "cashier"] = "cashier"
     password: str = Field(default="", max_length=1024)
+    active: StrictBool = True
+    expires_at: datetime | None = None
+    permissions: list[str] | None = Field(default=None, max_length=100)
+
+    @field_validator("permissions")
+    @classmethod
+    def validate_permissions(cls, value: list[str] | None):
+        if value is None:
+            return None
+        from app.core.permissions import ALL_PERMISSIONS
+        cleaned = list(dict.fromkeys(str(x).strip() for x in value if str(x).strip()))
+        invalid = [x for x in cleaned if x not in ALL_PERMISSIONS]
+        if invalid:
+            raise ValueError("صلاحيات غير معروفة: " + ", ".join(invalid[:5]))
+        return cleaned
 
 
 class CustomerSave(CleanModel):

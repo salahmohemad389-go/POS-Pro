@@ -25,6 +25,12 @@ def import_products(db: Session, raw: bytes, filename: str) -> dict[str, Any]:
     return _import(db, raw, filename)
 
 
+def update_product_prices(db: Session, raw: bytes, filename: str) -> dict[str, Any]:
+    """Update prices/costs for existing products without creating rows."""
+    from app.services.price_update_service import update_product_prices as _update
+    return _update(db, raw, filename)
+
+
 def import_customers(db: Session, raw: bytes, filename: str) -> dict[str, Any]:
     """Import customers from a file."""
     from app.services.import_export_engine import import_customers as _import

@@ -53,6 +53,10 @@ async def list_invoices(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    can_all = has_permission(user, "invoice_view")
+    can_own = has_permission(user, "invoice_view_own")
+    if not can_all and not can_own:
+        raise HTTPException(403, "لا تملك صلاحية عرض الفواتير")
     query = db.query(Invoice)
     if customer_id:
         query = query.filter(Invoice.customer_id == customer_id)
@@ -66,7 +70,7 @@ async def list_invoices(
         query = query.filter(Invoice.created_at >= datetime(now.year, now.month, 1))
     elif filter == "year":
         query = query.filter(Invoice.created_at >= datetime(now.year, 1, 1))
-    if user.role == "cashier":
+    if user.role == "cashier" or not can_all:
         query = query.filter(Invoice.user_id == user.id)
     items = query.order_by(desc(Invoice.created_at), desc(Invoice.id)).offset((page - 1) * limit).limit(limit).all()
     total = -1 if skip_total else query.count()
@@ -75,9 +79,15 @@ async def list_invoices(
 
 @router.get("/{iid}")
 async def get_invoice(iid: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    can_all = has_permission(user, "invoice_view")
+    can_own = has_permission(user, "invoice_view_own")
+    if not can_all and not can_own:
+        raise HTTPException(403, "لا تملك صلاحية عرض الفواتير")
     inv = db.query(Invoice).filter(Invoice.id == iid).first()
     if not inv:
         raise HTTPException(404, "فاتورة غير موجودة")
+    if not can_all and inv.user_id != user.id:
+        raise HTTPException(403, "لا يمكنك عرض فاتورة مستخدم آخر")
     try:
         ensure_invoice_access(user, inv)
     except ValueError as e:
@@ -95,8 +105,12 @@ async def get_invoice_pdf(iid: int, request: Request, user: User = Depends(get_c
     inv = db.query(Invoice).filter(Invoice.id == iid).first()
     if not inv:
         raise HTTPException(404, "فاتورة غير موجودة")
-    if not has_permission(user, "invoice_view"):
+    can_all = has_permission(user, "invoice_view")
+    can_own = has_permission(user, "invoice_view_own")
+    if not can_all and not can_own:
         raise HTTPException(403, "لا تملك صلاحية")
+    if not can_all and inv.user_id != user.id:
+        raise HTTPException(403, "لا يمكنك عرض فاتورة مستخدم آخر")
     try:
         ensure_invoice_access(user, inv)
     except ValueError as e:
@@ -258,4 +272,3 @@ async def get_original_invoice_for_return(original_id: int, user: User = Depends
         raise
     except ValueError as exc:
         raise HTTPException(400, str(exc))
-
