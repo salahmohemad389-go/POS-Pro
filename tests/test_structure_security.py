@@ -23,9 +23,10 @@ def test_page_modules_do_not_compose_peer_page_method_objects():
     assert offenders == {}, f"Page modules must stay independent; compose them only in static/app.js: {offenders}"
 
 def test_new_pos_branding_permissions_and_pdf_controls_are_wired():
-    shell = (STATIC / "js" / "upgrade_dom.js").read_text(encoding="utf-8"); misc = (ROOT / "app" / "api" / "routes" / "misc.py").read_text(encoding="utf-8"); appjs = (STATIC / "app.js").read_text(encoding="utf-8"); upgrades = (STATIC / "js" / "upgrade_methods.js").read_text(encoding="utf-8"); products = (STATIC / "js" / "pages" / "products.js").read_text(encoding="utf-8")
-    for element_id in ("loginLogoImg", "sidebarLogoImg", "toggleLoginPass", "posReturnBtn", "updatePricesInput", "pdfPreviewModal", "userExpiresAt", "userPermissionsGrid"): assert f'id="{element_id}"' in shell
-    assert "upgrade_dom.js" in misc and "upgrade.css" in misc; assert "loadPublicBranding" in appjs; assert "feature_reports_enabled" in appjs and "feature_suppliers_enabled" in appjs; assert "row.addEventListener('click', add)" in upgrades; assert "المتاح فقط" in upgrades; assert "pdfPreviewFrame" in upgrades and "printPdfPreview" in upgrades; assert "upgradeMethods" in appjs; assert "/api/products/import-prices" in products
+    shell = (STATIC / "js" / "upgrade_dom.js").read_text(encoding="utf-8"); misc = (ROOT / "app" / "api" / "routes" / "misc.py").read_text(encoding="utf-8"); appjs = (STATIC / "app.js").read_text(encoding="utf-8"); upgrades = (STATIC / "js" / "upgrade_methods.js").read_text(encoding="utf-8"); products = (STATIC / "js" / "pages" / "products.js").read_text(encoding="utf-8"); settings = (STATIC / "js" / "pages" / "settings.js").read_text(encoding="utf-8")
+    for element_id in ("toggleLoginPass", "posReturnBtn", "updatePricesInput", "pdfPreviewModal", "userExpiresAt", "userPermissionsGrid", "sidebarCollapseBtn", "setFeatureInvoices", "setFeatureCustomers", "setQuickQtyEnabled", "setPrimaryColor", "shortcutReturn"): assert f'id="{element_id}"' in shell
+    assert "loginLogoImg" not in shell and "sidebarLogoImg" not in shell
+    assert "upgrade_dom.js" in misc and "upgrade.css" in misc; assert "loadPublicBranding" in appjs; assert "feature_reports_enabled" in appjs and "feature_suppliers_enabled" in appjs; assert "row.addEventListener('click', add)" in upgrades; assert "المتاح فقط" in upgrades; assert "pdfPreviewFrame" in upgrades and "printPdfPreview" in upgrades; assert "returnPickerModal" in upgrades; assert "shortcut_return" in settings; assert "upgradeMethods" in appjs; assert "/api/products/import-prices" in products
 
 def test_combined_items_merge_same_product_in_source_order_and_net_returns():
     from types import SimpleNamespace
@@ -38,7 +39,7 @@ def test_combined_items_merge_same_product_in_source_order_and_net_returns():
     items, totals = _merge_items([sales1,sales2,returned], {"deduct_returns":True}); assert [x["product_name"] for x in items] == ["A","B","C"]; assert [x["quantity"] for x in items] == [2.0,2.0,1.0]; assert items[1]["total"] == 50.0; assert items[1]["unit_price"] == 25.0; assert totals["total"] == 100.0
 
 def test_frontend_has_no_external_runtime_dependencies_or_browser_token_storage():
-    text = "\n".join(p.read_text(encoding="utf-8") for p in STATIC.rglob("*") if p.suffix in {".html", ".js", ".css"}); assert not re.search(r"https?://", text); lowered = text.lower();
+    text = "\n".join(p.read_text(encoding="utf-8") for p in STATIC.rglob("*") if p.suffix in {".html", ".js", ".css"}); text_for_urls = text.replace("http://www.w3.org/2000/svg", ""); assert not re.search(r"https?://", text_for_urls); lowered = text.lower();
     assert "localstorage.setitem('token" not in lowered; assert 'localstorage.setitem("token' not in lowered; assert "localstorage.setitem('pos_session" not in lowered; assert 'localstorage.setitem("pos_session' not in lowered; assert "sessionstorage.setitem('token" not in lowered; assert "authorization: `bearer" not in lowered
 
 def test_no_product_image_feature_and_pos_uses_server_pdf():
@@ -57,7 +58,7 @@ def test_runtime_requirements_are_pinned_and_hardened():
     lines = [x.strip() for x in (ROOT / "requirements.txt").read_text().splitlines() if x.strip() and not x.startswith("#")]; assert lines; assert all("==" in x for x in lines); assert "defusedxml==0.7.1" in lines
 
 def test_return_workflow_is_exposed_only_from_original_invoice():
-    html = (STATIC / "index.html").read_text(encoding="utf-8"); invoices = (STATIC / "js" / "pages" / "invoices.js").read_text(encoding="utf-8"); pos = (STATIC / "js" / "pages" / "pos.js").read_text(encoding="utf-8"); assert 'id="returnInvoiceBtn"' in html; assert 'id="returnInvoiceModal"' in html; assert "/api/invoices/return-original-items/" in invoices; assert "API.post('/api/invoices/return'" in invoices; assert "/api/invoices/return" not in pos
+    html = (STATIC / "index.html").read_text(encoding="utf-8"); invoices = (STATIC / "js" / "pages" / "invoices.js").read_text(encoding="utf-8"); pos = (STATIC / "js" / "pages" / "pos.js").read_text(encoding="utf-8"); upgrades = (STATIC / "js" / "upgrade_methods.js").read_text(encoding="utf-8"); assert 'id="returnInvoiceBtn"' in html; assert 'id="returnInvoiceModal"' in html; assert "/api/invoices/return-original-items/" in invoices; assert "API.post('/api/invoices/return'" in invoices; assert "/api/invoices/return" not in pos; assert "openReturnInvoice" in upgrades and "returnPickerModal" in upgrades
 
 def test_partial_payment_ui_and_backend_semantics_are_explicit():
     pos = (STATIC / "js" / "pages" / "pos.js").read_text(encoding="utf-8"); assert "paid <= 0 || paid >= total" in pos; service = (ROOT / "app" / "services" / "invoice_service.py").read_text(encoding="utf-8"); assert "الدفع الجزئي يجب أن يكون أكبر من صفر وأقل من إجمالي الفاتورة" in service; assert "المرتجع النقدي يجب أن يرد قيمة المرتجع كاملة" in service
