@@ -2,19 +2,64 @@
 
 from __future__ import annotations
 
+import hmac
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.permissions import PERMISSION_MATRIX, has_permission
 from app.core.ratelimit import consume_attempt, record_success
 from app.core.security import create_token, get_current_user, hash_password, verify_password, password_needs_upgrade, validate_password
-from app.core.config import IS_PRODUCTION, TOKEN_EXPIRE_HOURS
+from app.core.config import IS_PRODUCTION, TOKEN_EXPIRE_HOURS, POS_ADMIN_LOGIN, POS_ADMIN_PASSWORD
 from app.db.session import get_db
-from app.db.models import User
+from app.db.models import AuditLog, User
 from app.services.audit_service import log_audit
 from app.schemas.requests import LoginRequest, ChangeCredentials
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _recover_first_admin_login(db: Session, login_: str, password: str) -> User | None:
+    """Recover a newly provisioned database whose bootstrap admin credentials drifted.
+
+    This recovery is deliberately narrow:
+    - it only accepts the configured POS_ADMIN_LOGIN/POS_ADMIN_PASSWORD pair;
+    - it only runs before the first successful login has ever been audited;
+    - it only runs when exactly one admin exists;
+    - after the first successful login, normal database credentials are authoritative.
+
+    That fixes first-deploy credential drift without turning the environment
+    password into a permanent backdoor after the operator changes credentials.
+    """
+    if not POS_ADMIN_PASSWORD or len(POS_ADMIN_PASSWORD) < 12:
+        return None
+    if login_ != POS_ADMIN_LOGIN:
+        return None
+    if not hmac.compare_digest(password, POS_ADMIN_PASSWORD):
+        return None
+    if db.query(AuditLog.id).filter(AuditLog.action == "login").first() is not None:
+        return None
+
+    admins = db.query(User).filter(User.role == "admin").order_by(User.id.asc()).all()
+    if len(admins) != 1:
+        return None
+
+    admin = admins[0]
+    login_owner = db.query(User).filter(User.login == POS_ADMIN_LOGIN, User.id != admin.id).first()
+    if login_owner:
+        return None
+
+    try:
+        admin.login = POS_ADMIN_LOGIN
+        admin.password_hash = hash_password(POS_ADMIN_PASSWORD)
+        admin.active = True
+        admin.token_version = int(admin.token_version or 0) + 1
+        db.commit()
+        db.refresh(admin)
+        return admin
+    except Exception:
+        db.rollback()
+        return None
 
 
 @router.post("/login")
@@ -31,8 +76,12 @@ async def login(payload: LoginRequest, request: Request, response: Response, db:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, f"تجاوزت الحد المسموح. حاول بعد {remaining // 60 + 1} دقيقة")
 
     user = db.query(User).filter(User.login == login_).first()
-    if not user or not user.active or not verify_password(password, user.password_hash):
-        raise HTTPException(401, "اسم المستخدم أو كلمة المرور غير صحيحة")
+    credentials_ok = bool(user and user.active and verify_password(password, user.password_hash))
+    if not credentials_ok:
+        recovered = _recover_first_admin_login(db, login_, password)
+        if recovered is None:
+            raise HTTPException(401, "اسم المستخدم أو كلمة المرور غير صحيحة")
+        user = recovered
 
     record_success(rate_key)
     if password_needs_upgrade(user.password_hash):
