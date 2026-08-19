@@ -23,7 +23,8 @@ def _recover_first_admin_login(db: Session, login_: str, password: str) -> User 
     """Recover a newly provisioned database whose bootstrap admin credentials drifted.
 
     This recovery is deliberately narrow:
-    - it only accepts the configured POS_ADMIN_LOGIN/POS_ADMIN_PASSWORD pair;
+    - it only accepts the configured admin password;
+    - it accepts the configured login or the conventional ``admin`` alias;
     - it only runs before the first successful login has ever been audited;
     - it only runs when exactly one admin exists;
     - after the first successful login, normal database credentials are authoritative.
@@ -33,7 +34,11 @@ def _recover_first_admin_login(db: Session, login_: str, password: str) -> User 
     """
     if not POS_ADMIN_PASSWORD or len(POS_ADMIN_PASSWORD) < 12:
         return None
-    if login_ != POS_ADMIN_LOGIN:
+
+    submitted_login = login_.strip()
+    configured_login = (POS_ADMIN_LOGIN or "admin").strip()
+    accepted_logins = {configured_login.casefold(), "admin"}
+    if submitted_login.casefold() not in accepted_logins:
         return None
     if not hmac.compare_digest(password, POS_ADMIN_PASSWORD):
         return None
@@ -45,12 +50,15 @@ def _recover_first_admin_login(db: Session, login_: str, password: str) -> User 
         return None
 
     admin = admins[0]
-    login_owner = db.query(User).filter(User.login == POS_ADMIN_LOGIN, User.id != admin.id).first()
+    # If the operator used the conventional first-login alias, keep it as the
+    # persisted login so the same credentials continue working after recovery.
+    recovered_login = configured_login if submitted_login.casefold() == configured_login.casefold() else "admin"
+    login_owner = db.query(User).filter(User.login == recovered_login, User.id != admin.id).first()
     if login_owner:
         return None
 
     try:
-        admin.login = POS_ADMIN_LOGIN
+        admin.login = recovered_login
         admin.password_hash = hash_password(POS_ADMIN_PASSWORD)
         admin.active = True
         admin.token_version = int(admin.token_version or 0) + 1
