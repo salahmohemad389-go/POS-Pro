@@ -1,8 +1,8 @@
 """Printable Arabic invoice renderer.
 
-The renderer is data-driven: branding comes from settings and invoice/customer
-fields come from the persisted invoice. A4 output follows the clean paper
-invoice layout requested for POS Pro while thermal output remains supported.
+Branding comes from persisted settings and invoice/customer fields come from the
+persisted invoice. A4 output follows the requested clean paper invoice layout;
+thermal output remains supported by the same renderer.
 """
 
 from __future__ import annotations
@@ -57,6 +57,7 @@ def _register_arabic_fonts(font_dir: Path) -> tuple[str, str]:
     try:
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
+
         regular = font_dir / "Amiri-Regular.ttf"
         bold = font_dir / "Amiri-Bold.ttf"
         if not regular.exists():
@@ -64,7 +65,11 @@ def _register_arabic_fonts(font_dir: Path) -> tuple[str, str]:
         pdfmetrics.registerFont(TTFont(_ARABIC_FONT, str(regular)))
         if bold.exists():
             pdfmetrics.registerFont(TTFont(_ARABIC_FONT_BOLD, str(bold)))
-            pdfmetrics.registerFontFamily(_ARABIC_FONT, normal=_ARABIC_FONT, bold=_ARABIC_FONT_BOLD)
+            pdfmetrics.registerFontFamily(
+                _ARABIC_FONT,
+                normal=_ARABIC_FONT,
+                bold=_ARABIC_FONT_BOLD,
+            )
             return _ARABIC_FONT, _ARABIC_FONT_BOLD
         return _ARABIC_FONT, _ARABIC_FONT
     except Exception as exc:
@@ -73,22 +78,22 @@ def _register_arabic_fonts(font_dir: Path) -> tuple[str, str]:
 
 
 def _logo_image(logo_data_url: Optional[str], max_width: float, max_height: float):
-    if not logo_data_url or not str(logo_data_url).startswith("data:image") or "," not in logo_data_url:
+    if not logo_data_url or not str(logo_data_url).startswith("data:image") or "," not in str(logo_data_url):
         return None
     try:
         from reportlab.lib.utils import ImageReader
         from reportlab.platypus import Image
+
         raw = base64.b64decode(str(logo_data_url).split(",", 1)[1], validate=True)
         buf = io.BytesIO(raw)
-        reader = ImageReader(buf)
-        width, height = reader.getSize()
+        width, height = ImageReader(buf).getSize()
         if not width or not height:
             return None
         scale = min(max_width / float(width), max_height / float(height))
         buf.seek(0)
         return Image(buf, width=max(1, width * scale), height=max(1, height * scale))
     except Exception as exc:
-        log.warning("Could not embed logo: %s", exc)
+        log.warning("Could not embed invoice logo: %s", exc)
         return None
 
 
@@ -101,14 +106,14 @@ def _money(value: Any) -> float:
 
 def _qty(value: Any) -> str:
     try:
-        number = float(value or 0)
-        return f"{number:g}"
+        return f"{float(value or 0):g}"
     except Exception:
         return "0"
 
 
 def _p(text: Any, style):
     from reportlab.platypus import Paragraph
+
     return Paragraph(ar(text), style)
 
 
@@ -130,18 +135,18 @@ def _created_text(invoice: Any) -> str:
         return str(created)
 
 
-def _header_block(invoice: Any, settings: dict[str, Any], page_w: float, content_w: float, regular: str, bold: str):
+def _header_block(invoice: Any, settings: dict[str, Any], content_w: float, regular: str, bold: str):
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_RIGHT
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.platypus import Spacer, Table, TableStyle
 
-    store_name = (settings.get("store_name") or "POS").strip()
-    tagline = (settings.get("tagline") or "").strip()
-    branch = (settings.get("branch") or "").strip()
-    address = (settings.get("address") or "").strip()
-    phone = (settings.get("phone") or "").strip()
+    store_name = str(settings.get("store_name") or "POS").strip() or "POS"
+    tagline = str(settings.get("tagline") or "").strip()
+    branch = str(settings.get("branch") or "").strip()
+    address = str(settings.get("address") or "").strip()
+    phone = str(settings.get("phone") or "").strip()
     logo = _logo_image(settings.get("logo"), 34 * mm, 27 * mm)
 
     name_style = ParagraphStyle("InvoiceStoreName", fontName=bold, fontSize=22, leading=27, alignment=TA_CENTER, textColor=colors.HexColor(_NAVY_DARK))
@@ -167,12 +172,19 @@ def _header_block(invoice: Any, settings: dict[str, Any], page_w: float, content
         brand.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("ALIGN", (1, 0), (1, 0), "CENTER"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-            ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
         ]))
     else:
         brand = Table([[title_flow]], colWidths=[content_w])
-        brand.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+        brand.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ]))
 
     inv_no = getattr(invoice, "invoice_number", None) or f"#{getattr(invoice, 'number', '-') or '-'}"
     customer_id = getattr(invoice, "customer_id", None)
@@ -189,19 +201,23 @@ def _header_block(invoice: Any, settings: dict[str, Any], page_w: float, content
         [_p(customer_phone, field_style), _p("رقم تليفون العميل:", field_bold)],
         [_p(customer_no, field_style), _p("رقم العميل:", field_bold)],
     ], colWidths=[content_w * .36, content_w * .22])
-    for tbl in (left_fields, right_fields):
-        tbl.setStyle(TableStyle([
+    for table in (left_fields, right_fields):
+        table.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
             ("LINEBELOW", (0, 0), (0, -1), .45, colors.HexColor("#6B7280")),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
     info = Table([[left_fields, right_fields]], colWidths=[content_w * .42, content_w * .58])
     info.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
     ]))
     return [brand, Spacer(1, 5 * mm), info, Spacer(1, 5 * mm)]
 
@@ -238,7 +254,7 @@ def _items_table(invoice: Any, content_w: float, regular: str, bold: str, *, the
                 ar(code),
                 str(idx),
             ])
-        target_rows = max(len(items), max(8, items_per_page))
+        target_rows = max(len(items), max(8, int(items_per_page or 17)))
         while len(data) - 1 < target_rows:
             data.append(["", "", "", "", "", "", ""])
         widths = [content_w * .13, content_w * .13, content_w * .12, content_w * .12, content_w * .28, content_w * .17, content_w * .05]
@@ -246,7 +262,7 @@ def _items_table(invoice: Any, content_w: float, regular: str, bold: str, *, the
     row_heights = [9 * mm] + ([7.5 * mm] * (len(data) - 1) if not thermal else [7 * mm] * (len(data) - 1))
     table = Table(data, colWidths=widths, rowHeights=row_heights, repeatRows=1)
     body_end = max(1, min(len(items), len(data) - 1))
-    table.setStyle(TableStyle([
+    style = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_NAVY)),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), bold),
@@ -257,11 +273,16 @@ def _items_table(invoice: Any, content_w: float, regular: str, bold: str, *, the
         ("ALIGN", (4 if not thermal else 3, 1), (4 if not thermal else 3, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("GRID", (0, 0), (-1, -1), .7, colors.HexColor(_BORDER)),
-        ("ROWBACKGROUNDS", (0, 1), (-1, body_end), [colors.white, colors.HexColor(_PALE)]),
-        ("BACKGROUND", (0, body_end + 1), (-1, -1), colors.HexColor(_PALE_2)),
-        ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-        ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-    ]))
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]
+    if len(items):
+        style.append(("ROWBACKGROUNDS", (0, 1), (-1, body_end), [colors.white, colors.HexColor(_PALE)]))
+    if body_end + 1 <= len(data) - 1:
+        style.append(("ROWBACKGROUNDS", (0, body_end + 1), (-1, -1), [colors.HexColor(_PALE_2), colors.white]))
+    table.setStyle(TableStyle(style))
     return table
 
 
@@ -270,7 +291,7 @@ def _totals(invoice: Any, currency: str, content_w: float, regular: str, bold: s
     from reportlab.lib.enums import TA_CENTER, TA_RIGHT
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
-    from reportlab.platypus import Spacer, Table, TableStyle
+    from reportlab.platypus import Table, TableStyle
 
     subtotal = _money(getattr(invoice, "subtotal", 0))
     discount = _money(getattr(invoice, "discount", 0))
@@ -288,15 +309,22 @@ def _totals(invoice: Any, currency: str, content_w: float, regular: str, bold: s
     total_label = ParagraphStyle("GrandLabel", fontName=bold, fontSize=13 if not thermal else 9, leading=16, alignment=TA_RIGHT, textColor=colors.HexColor(_NAVY_DARK))
     total_value = ParagraphStyle("GrandValue", fontName=bold, fontSize=15 if not thermal else 11, leading=18, alignment=TA_CENTER, textColor=colors.HexColor(_NAVY_DARK))
 
-    grand = Table([[_p(f"{sign * subtotal:.2f} {currency}", total_value), _p("الإجمالي", total_label)]], colWidths=[content_w * .28, content_w * .72], rowHeights=[12 * mm if not thermal else 9 * mm])
+    grand = Table(
+        [[_p(f"{sign * subtotal:.2f} {currency}", total_value), _p("الإجمالي", total_label)]],
+        colWidths=[content_w * .28, content_w * .72],
+        rowHeights=[12 * mm if not thermal else 9 * mm],
+    )
     grand.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_PALE)),
         ("BOX", (0, 0), (-1, -1), 1, colors.HexColor(_BORDER)),
         ("INNERGRID", (0, 0), (-1, -1), .7, colors.HexColor(_BORDER)),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
     ]))
 
+    # Physical order is left-to-right so the highlighted final amount stays on
+    # the left like the reference invoice. Zero-only boxes are omitted entirely.
     cells: list[tuple[str, float, bool]] = [("المبلغ النهائي", sign * total, True)]
     if remaining > .004:
         cells.append(("المبلغ المتبقي", sign * remaining, False))
@@ -309,22 +337,30 @@ def _totals(invoice: Any, currency: str, content_w: float, regular: str, bold: s
         suffix = f" ({tax_rate:g}%)" if tax_rate else ""
         cells.append((f"الضريبة{suffix}", sign * tax, False))
 
-    row = []
-    for cell_label, amount, highlighted in cells:
-        inner = Table([[_p(cell_label, label)], [_p(f"{amount:.2f}", value)]], colWidths=[1])
-        inner.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_GOLD if highlighted else _PALE_2)),
-            ("BOX", (0, 0), (-1, -1), .8, colors.HexColor(_BORDER)),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ]))
-        row.append(inner)
-    summary = Table([row], colWidths=[content_w / len(row)] * len(row))
-    summary.setStyle(TableStyle([
+    cell_width = content_w / max(1, len(cells))
+    summary = Table(
+        [
+            [_p(cell_label, label) for cell_label, _amount, _highlighted in cells],
+            [_p(f"{amount:.2f}", value) for _cell_label, amount, _highlighted in cells],
+        ],
+        colWidths=[cell_width] * len(cells),
+        rowHeights=[8 * mm if not thermal else 6 * mm, 10 * mm if not thermal else 8 * mm],
+    )
+    summary_style = [
+        ("BOX", (0, 0), (-1, -1), .8, colors.HexColor(_BORDER)),
+        ("INNERGRID", (0, 0), (-1, -1), .7, colors.HexColor(_BORDER)),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]
+    for idx, (_cell_label, _amount, highlighted) in enumerate(cells):
+        summary_style.append(("BACKGROUND", (idx, 0), (idx, -1), colors.HexColor(_GOLD if highlighted else _PALE_2)))
+        if highlighted:
+            summary_style.append(("TEXTCOLOR", (idx, 0), (idx, 0), colors.white))
+    summary.setStyle(TableStyle(summary_style))
     return [grand, summary]
 
 
@@ -357,20 +393,20 @@ def generate_invoice_pdf(invoice: Any, settings: dict[str, Any], font_dir: Path,
     )
 
     story: list[Any] = []
-    story.extend(_header_block(invoice, settings, page_w, content_w, regular, bold))
+    story.extend(_header_block(invoice, settings, content_w, regular, bold))
     story.append(_items_table(invoice, content_w, regular, bold, thermal=thermal, items_per_page=items_per_page))
     story.append(Spacer(1, 3 * mm))
     story.extend(_totals(invoice, settings.get("currency") or "ج.م", content_w, regular, bold, thermal=thermal))
 
     note_style = ParagraphStyle("InvoiceNote", fontName=regular, fontSize=8.5 if not thermal else 7.5, leading=12, alignment=TA_RIGHT, textColor=colors.HexColor(_MUTED))
     footer_style = ParagraphStyle("InvoiceFooter", fontName=regular, fontSize=9 if not thermal else 7.5, leading=12, alignment=TA_CENTER, textColor=colors.HexColor(_NAVY))
-    custom_lines = (settings.get("custom_lines") or "").strip()
+    custom_lines = str(settings.get("custom_lines") or "").strip()
     if custom_lines:
         story.append(Spacer(1, 3 * mm))
         for line in custom_lines.splitlines():
             if line.strip():
                 story.append(Paragraph(ar(line.strip()), note_style))
-    footer = (settings.get("footer") or "").strip()
+    footer = str(settings.get("footer") or "").strip()
     if footer:
         story.append(Spacer(1, 3 * mm))
         story.append(Paragraph(ar(footer), footer_style))
