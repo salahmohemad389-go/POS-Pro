@@ -3,19 +3,55 @@
 from __future__ import annotations
 
 import base64
+import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Response as FastAPIResponse
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter, Request, Response as FastAPIResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 
 STATIC_DIR = Path(__file__).resolve().parent.parent.parent.parent / "static"
 
 router = APIRouter(tags=["misc"])
+log = logging.getLogger("pospro.client")
 
 
 @router.get("/")
 async def root():
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    """Serve the UI and load a small same-origin diagnostic before app.js.
+
+    The diagnostic is intentionally temporary while the production login UI is
+    being investigated. It only reports JavaScript error metadata; it never
+    reads or sends form values, cookies, or credentials.
+    """
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    marker = '<script type="module" src="/static/app.js"></script>'
+    diagnostic = '<script src="/static/client_diag.js" defer></script>\n' + marker
+    if marker in html:
+        html = html.replace(marker, diagnostic, 1)
+    return HTMLResponse(content=html)
+
+
+@router.post("/api/client-error", include_in_schema=False)
+async def client_error(request: Request):
+    """Log bounded, non-sensitive browser startup diagnostics."""
+    try:
+        data = await request.json()
+    except Exception:
+        return FastAPIResponse(status_code=204)
+
+    def clean(name: str, limit: int) -> str:
+        value = data.get(name, "") if isinstance(data, dict) else ""
+        return str(value).replace("\n", " ").replace("\r", " ")[:limit]
+
+    log.warning(
+        "CLIENT_JS_ERROR kind=%s source=%s line=%s col=%s message=%s",
+        clean("kind", 80),
+        clean("source", 300),
+        clean("line", 20),
+        clean("col", 20),
+        clean("message", 1000),
+    )
+    return FastAPIResponse(status_code=204)
 
 
 @router.get("/favicon.ico")
