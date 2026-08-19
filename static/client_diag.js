@@ -75,21 +75,15 @@
       }
     }
 
-    try {
-      await import('/static/app.js?diag=1');
-      await report({ kind: 'diag-complete', source: '/static/app.js', message: 'module graph imported successfully' });
-    } catch (error) {
-      await report({
-        kind: 'app-import',
-        source: '/static/app.js',
-        message: error && error.message ? error.message : String(error),
-      });
-      const err = document.getElementById('loginError');
-      if (err) {
-        err.textContent = 'تعذر تشغيل واجهة البرنامج. تم إرسال التشخيص تلقائياً.';
-        err.style.display = 'block';
-      }
-    }
+    // Do not import app.js here: the page already loads it normally. Importing
+    // it a second time with a query string would create a second App instance
+    // and duplicate event listeners. The window error hooks above still catch
+    // any normal app.js evaluation failure.
+    await report({
+      kind: 'diag-complete',
+      source: 'module-graph',
+      message: 'dependency modules imported successfully',
+    });
   }
 
   diagnoseModuleGraph();
