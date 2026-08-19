@@ -18,6 +18,17 @@ def test_all_javascript_parses():
         assert cp.returncode == 0, f"{file}: {cp.stderr}"
 
 
+def test_page_modules_do_not_compose_peer_page_method_objects():
+    page_dir = STATIC / "js" / "pages"
+    peer_spread = re.compile(r"\.\.\.[A-Za-z]+Methods\b")
+    offenders = {}
+    for file in sorted(page_dir.glob("*.js")):
+        matches = peer_spread.findall(file.read_text(encoding="utf-8"))
+        if matches:
+            offenders[file.name] = matches
+    assert offenders == {}, f"Page modules must stay independent; compose them only in static/app.js: {offenders}"
+
+
 def test_frontend_has_no_external_runtime_dependencies_or_browser_token_storage():
     text = "\n".join(p.read_text(encoding="utf-8") for p in STATIC.rglob("*") if p.suffix in {".html", ".js", ".css"})
     assert not re.search(r"https?://", text)

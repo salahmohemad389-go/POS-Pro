@@ -102,27 +102,6 @@ export const settingsMethods = {
 
   closeModal(id) { document.getElementById(id).classList.remove('active'); },
 
-  /* ─── POS ─── */
-  ...posMethods,
-
-  /* ─── PRODUCTS PAGE ─── */
-  ...productMethods,
-
-  /* ─── SUPPLIERS ─── */
-  ...supplierMethods,
-
-  /* ─── CUSTOMERS ─── */
-  ...customerMethods,
-
-  /* ─── INVOICES ─── */
-  ...invoiceMethods,
-
-  /* ─── REPORTS ─── */
-  ...reportMethods,
-
-  /* ─── USERS ─── */
-  ...userMethods,
-
   /* ─── SETTINGS ─── */
   renderSettings() {
     const s = S.settings;
