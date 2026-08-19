@@ -20,7 +20,7 @@ def ok(resp, code=200):
 
 with TestClient(app) as owner:
     brand = ok(owner.get('/api/branding')).json()
-    assert brand['store_name'] == 'صالح الأسناوي' and 'logo' in brand
+    assert brand['store_name'] == 'POS' and brand.get('logo', '') == ''
     owner_user = ok(owner.post('/api/auth/login', json={'login':'admin','password':'AdminPassword#12345'})).json()['user']
     assert owner_user['is_owner'] is True
     pid = ok(owner.post('/api/products', json={'name':'Merged P','barcode':'MRG-P','price':100,'cost':50,'stock':20})).json()['id']
@@ -42,6 +42,10 @@ with TestClient(app) as owner:
     ok(owner.post('/api/settings', json={'store_name':'اختبار العلامة','feature_reports_enabled':False,'feature_suppliers_enabled':False}))
     settings = ok(owner.get('/api/settings')).json(); assert settings['feature_reports_enabled'] is False and settings['feature_suppliers_enabled'] is False
     assert ok(owner.get('/api/branding')).json()['store_name'] == 'اختبار العلامة'
+    ok(owner.post('/api/settings/ui', json={'feature_invoices_enabled':False,'feature_customers_enabled':True,'quick_qty_enabled':False,'primary_color':'#123456','accent_color':'#abcdef','shortcut_return':'Ctrl+R'}))
+    ui = ok(owner.get('/api/settings')).json()
+    assert ui['feature_invoices_enabled'] is False and ui['quick_qty_enabled'] is False
+    assert ui['primary_color'] == '#123456' and ui['shortcut_return'] == 'Ctrl+R'
     ok(owner.post('/api/users', json={'name':'Limited Manager','login':'limitedmgr','role':'manager','password':'ManagerPassword#123','permissions':['user_view']}))
     with TestClient(app) as mgr:
         ok(mgr.post('/api/auth/login', json={'login':'limitedmgr','password':'ManagerPassword#123'})); users = ok(mgr.get('/api/users')).json()
