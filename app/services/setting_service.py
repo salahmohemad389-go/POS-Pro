@@ -25,6 +25,8 @@ _CACHE_TTL: int = 30
 UI_DEFAULTS: dict[str, Any] = {
     "feature_invoices_enabled": True,
     "feature_customers_enabled": True,
+    "feature_products_enabled": True,
+    "feature_audit_enabled": True,
     "quick_qty_enabled": True,
     "primary_color": "#2563eb",
     "accent_color": "#0891b2",
