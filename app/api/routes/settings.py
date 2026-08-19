@@ -26,6 +26,8 @@ _COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _BOOL_KEYS = {
     "feature_invoices_enabled",
     "feature_customers_enabled",
+    "feature_products_enabled",
+    "feature_audit_enabled",
     "quick_qty_enabled",
 }
 _COLOR_KEYS = {"primary_color", "accent_color"}
