@@ -21,12 +21,7 @@ log = logging.getLogger("pospro.client")
 
 @router.get("/")
 async def root():
-    """Serve the UI and load a small same-origin diagnostic before app.js.
-
-    The diagnostic is intentionally temporary while the production login UI is
-    being investigated. It only reports JavaScript error metadata; it never
-    reads or sends form values, cookies, or credentials.
-    """
+    """Serve the UI and same-origin startup helpers before app.js."""
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     if '</head>' in html:
         html = html.replace('</head>', '<link rel="stylesheet" href="/static/css/upgrade.css">\n</head>', 1)
@@ -34,6 +29,7 @@ async def root():
     shell = (
         '<script src="/static/client_diag.js" defer></script>\n'
         '<script src="/static/js/upgrade_dom.js"></script>\n'
+        '<script src="/static/js/final_ui_patch.js"></script>\n'
         + marker
     )
     if marker in html:
