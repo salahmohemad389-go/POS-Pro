@@ -1,8 +1,8 @@
-"""PDF generation for POS Pro v2.5.0 - Arabic + RTL support via ReportLab.
+"""Professional Arabic invoice PDF renderer for POS Pro.
 
-Uses the bundled Amiri font (free, OFL licensed) for Arabic glyphs.
+The PDF is rendered from the persisted invoice snapshot plus store settings.
+It never depends on a printer being connected and uses only bundled fonts/assets.
 """
-
 from __future__ import annotations
 
 import base64
@@ -21,7 +21,7 @@ except Exception as exc:
     arabic_reshaper = None
     get_display = None
     _SHAPING_AVAILABLE = False
-    log.warning("arabic_reshaper/python-bidi not available: %s", exc)
+    log.warning("Arabic shaping unavailable: %s", exc)
 
 
 def ar(text: Any) -> str:
@@ -31,10 +31,7 @@ def ar(text: Any) -> str:
     if not s or not _SHAPING_AVAILABLE:
         return s
     try:
-        if "\n" in s:
-            return "\n".join(ar(line) for line in s.split("\n"))
-        reshaped = arabic_reshaper.reshape(s)
-        return get_display(reshaped)
+        return "\n".join(get_display(arabic_reshaper.reshape(line)) for line in s.split("\n"))
     except Exception:
         return s
 
@@ -51,36 +48,48 @@ def _register_arabic_fonts(font_dir: Path) -> tuple[str, str]:
         from reportlab.pdfbase.ttfonts import TTFont
         regular = font_dir / "Amiri-Regular.ttf"
         bold = font_dir / "Amiri-Bold.ttf"
-        if regular.exists():
-            pdfmetrics.registerFont(TTFont(_ARABIC_FONT, str(regular)))
-        else:
-            log.warning("Amiri-Regular.ttf not found at %s", regular)
+        if not regular.exists():
             return _FALLBACK_FONT, _FALLBACK_FONT_BOLD
+        pdfmetrics.registerFont(TTFont(_ARABIC_FONT, str(regular)))
         if bold.exists():
             pdfmetrics.registerFont(TTFont(_ARABIC_FONT_BOLD, str(bold)))
             pdfmetrics.registerFontFamily(_ARABIC_FONT, normal=_ARABIC_FONT, bold=_ARABIC_FONT_BOLD)
             return _ARABIC_FONT, _ARABIC_FONT_BOLD
-        log.warning("Amiri-Bold.ttf not found at %s", bold)
         return _ARABIC_FONT, _ARABIC_FONT
     except Exception as exc:
         log.warning("Could not register Arabic fonts: %s", exc)
         return _FALLBACK_FONT, _FALLBACK_FONT_BOLD
 
 
-def _logo_image(logo_data_url: Optional[str], max_width: float = 40 * 6):
-    if not logo_data_url or not logo_data_url.startswith("data:image"):
+def _logo_image(logo_data_url: Optional[str], max_width: float, max_height: float):
+    if not logo_data_url or not str(logo_data_url).startswith("data:image") or "," not in str(logo_data_url):
         return None
     try:
+        from reportlab.lib.utils import ImageReader
         from reportlab.platypus import Image
-        if "," not in logo_data_url:
+        raw = base64.b64decode(str(logo_data_url).split(",", 1)[1])
+        bio = io.BytesIO(raw)
+        iw, ih = ImageReader(bio).getSize()
+        if not iw or not ih:
             return None
-        b64 = logo_data_url.split(",", 1)[1]
-        img_bytes = base64.b64decode(b64)
-        buf = io.BytesIO(img_bytes)
-        return Image(buf, width=max_width, height=max_width)
+        scale = min(max_width / iw, max_height / ih)
+        bio.seek(0)
+        return Image(bio, width=iw * scale, height=ih * scale)
     except Exception as exc:
         log.warning("Could not embed logo: %s", exc)
         return None
+
+
+def _money(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except Exception:
+        return 0.0
+
+
+def _display_amount(invoice: Any, value: Any) -> float:
+    amount = _money(value)
+    return -abs(amount) if getattr(invoice, "type", "") == "return" else amount
 
 
 def generate_invoice_pdf(invoice: Any, settings: dict[str, Any], font_dir: Path, *, page_size: str = "a4", items_per_page: int = 17) -> bytes:
@@ -89,150 +98,150 @@ def generate_invoice_pdf(invoice: Any, settings: dict[str, Any], font_dir: Path,
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import mm
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.platypus import KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-    arabic_font, arabic_font_bold = _register_arabic_fonts(font_dir)
-    if page_size == "thermal":
-        page_w = 80 * mm
-        page_h = 297 * mm
-        pagesize = (page_w, page_h)
-    else:
-        pagesize = A4
-        page_w, page_h = A4
+    font, bold = _register_arabic_fonts(font_dir)
+    thermal = page_size == "thermal"
+    pagesize = (80 * mm, 297 * mm) if thermal else A4
+    page_w, _ = pagesize
+    margin = 5 * mm if thermal else 10 * mm
+    content_w = page_w - 2 * margin
+    navy = colors.HexColor("#163B63")
+    pale = colors.HexColor("#EAF4FB")
+    pale2 = colors.HexColor("#F8FBFD")
+    gold = colors.HexColor("#C99A35")
+    line = colors.HexColor("#163B63")
+    text = colors.HexColor("#142033")
 
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=pagesize, rightMargin=12 * mm, leftMargin=12 * mm,
-        topMargin=10 * mm, bottomMargin=10 * mm,
-        title=f"Invoice-{invoice.invoice_number or invoice.number}",
-        author=settings.get("store_name", "POS Pro"),
-    )
+    inv_no = getattr(invoice, "invoice_number", None) or f"#{getattr(invoice, 'number', '')}"
+    doc = SimpleDocTemplate(buf, pagesize=pagesize, rightMargin=margin, leftMargin=margin, topMargin=7 * mm, bottomMargin=8 * mm, title=f"Invoice-{inv_no}", author=settings.get("store_name") or "POS")
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("TitleStyle", parent=styles["Heading1"], fontName=arabic_font_bold, fontSize=18, alignment=TA_CENTER, spaceAfter=4, textColor=colors.HexColor("#8B0000"), leading=22)
-    sub_style = ParagraphStyle("SubStyle", parent=styles["Normal"], fontName=arabic_font, fontSize=10, alignment=TA_CENTER, spaceAfter=2, textColor=colors.HexColor("#B45309"), leading=14)
-    normal_style = ParagraphStyle("NormalStyle", parent=styles["Normal"], fontName=arabic_font, fontSize=10, alignment=TA_RIGHT, spaceAfter=2, leading=13)
-    small_style = ParagraphStyle("SmallStyle", parent=styles["Normal"], fontName=arabic_font, fontSize=8, alignment=TA_RIGHT, spaceAfter=1, leading=10, textColor=colors.HexColor("#555555"))
-    footer_style = ParagraphStyle("FooterStyle", parent=styles["Normal"], fontName=arabic_font, fontSize=11, alignment=TA_CENTER, textColor=colors.HexColor("#1e3a5f"), leading=14)
+    store_style = ParagraphStyle("store", parent=styles["Normal"], fontName=bold, fontSize=18 if not thermal else 12, leading=22 if not thermal else 15, alignment=TA_CENTER, textColor=navy)
+    small_center = ParagraphStyle("small-center", parent=styles["Normal"], fontName=font, fontSize=8.5 if not thermal else 6.7, leading=11, alignment=TA_CENTER, textColor=text)
+    meta_label = ParagraphStyle("meta-label", parent=styles["Normal"], fontName=bold, fontSize=9 if not thermal else 6.7, leading=11, alignment=TA_RIGHT, textColor=navy)
+    meta_value = ParagraphStyle("meta-value", parent=styles["Normal"], fontName=font, fontSize=9 if not thermal else 6.7, leading=11, alignment=TA_RIGHT, textColor=text)
+    footer_style = ParagraphStyle("footer", parent=styles["Normal"], fontName=font, fontSize=8, leading=11, alignment=TA_CENTER, textColor=text)
     story: list[Any] = []
 
-    logo_img = _logo_image(settings.get("logo"))
-    if logo_img:
-        story.append(logo_img)
-        story.append(Spacer(1, 3 * mm))
-    if settings.get("store_name"):
-        story.append(Paragraph(ar(settings["store_name"]), title_style))
-    if settings.get("tagline"):
-        story.append(Paragraph(ar(settings["tagline"]), sub_style))
-    if settings.get("slogan"):
-        story.append(Paragraph(ar(settings["slogan"]), sub_style))
-    if settings.get("branch") and settings["branch"] != settings.get("slogan"):
-        story.append(Paragraph(ar(settings["branch"]), small_style))
-    story.append(Spacer(1, 4 * mm))
+    logo = _logo_image(settings.get("logo"), 48 * mm if not thermal else 28 * mm, 25 * mm if not thermal else 15 * mm)
+    if logo:
+        logo.hAlign = "CENTER"
+        story.append(logo)
+        story.append(Spacer(1, 2 * mm))
+    store_name = (settings.get("store_name") or "").strip()
+    if store_name:
+        story.append(Paragraph(ar(store_name), store_style))
+    secondary = [x.strip() for x in [settings.get("tagline") or "", settings.get("branch") or "", settings.get("address") or "", settings.get("phone") or ""] if x and str(x).strip()]
+    if secondary:
+        story.append(Paragraph(ar(" • ".join(secondary)), small_center))
+    story.append(Spacer(1, 4 * mm if not thermal else 2 * mm))
 
-    inv_type_ar = {"sale": "فاتورة بيع", "return": "فاتورة مرتجع", "combined": "فاتورة مجمعة"}.get(invoice.type, "فاتورة")
-    payment_ar = {"cash": "نقدي", "credit": "آجل", "partial": "جزئي", "mixed": "مختلط"}.get(invoice.payment_method, invoice.payment_method or "")
-    status_ar = {"paid": "مدفوعة", "unpaid": "آجل", "partial": "جزئي"}.get(invoice.status, invoice.status or "")
-    created = invoice.created_at.strftime("%Y-%m-%d %H:%M") if invoice.created_at else "-"
-    inv_no = invoice.invoice_number or f"#{invoice.number}"
-    meta_data = [
-        [ar("رقم الفاتورة:"), ar(inv_no)], [ar("التاريخ:"), ar(created)],
-        [ar("النوع:"), ar(inv_type_ar)], [ar("طريقة الدفع:"), ar(payment_ar or "-")],
-        [ar("الحالة:"), ar(status_ar or "-")], [ar("الكاشير:"), ar(invoice.user_name or "-")],
-        [ar("العميل:"), ar(invoice.customer_name or "عميل نقدي")], [ar("الموبايل:"), ar(invoice.customer_phone or "-")],
-    ]
-    meta_table = Table(meta_data, colWidths=[42 * mm, page_w - 24 * mm - 42 * mm])
-    meta_table.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), arabic_font), ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#555555")),
-        ("FONTNAME", (1, 0), (1, -1), arabic_font_bold), ("TEXTCOLOR", (1, 0), (1, -1), colors.HexColor("#8B0000")),
-        ("ALIGN", (0, 0), (-1, -1), "RIGHT"), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-        ("TOPPADDING", (0, 0), (-1, -1), 2), ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    story.append(meta_table)
-    story.append(Spacer(1, 4 * mm))
+    created = getattr(invoice, "created_at", None)
+    created_text = created.strftime("%Y-%m-%d %H:%M") if created else "-"
+    customer_name = getattr(invoice, "customer_name", None) or "عميل نقدي"
+    customer_phone = getattr(invoice, "customer_phone", None) or "-"
+    customer_id = getattr(invoice, "customer_id", None)
+    customer_no = str(customer_id) if customer_id else "-"
+    inv_type = getattr(invoice, "type", "sale")
+    type_label = {"sale":"فاتورة بيع", "return":"مرتجع", "combined":"فاتورة مجمعة"}.get(inv_type, "فاتورة")
 
-    items = invoice.items or []
-    currency = settings.get("currency", "ج.م")
-    pages_items: list[list[Any]] = []
-    for i in range(0, max(1, len(items)), items_per_page):
-        pages_items.append(items[i:i + items_per_page])
+    if not thermal:
+        meta = [
+            [Paragraph(ar("اسم العميل:"), meta_label), Paragraph(ar(customer_name), meta_value), Paragraph(ar("التاريخ:"), meta_label), Paragraph(ar(created_text), meta_value)],
+            [Paragraph(ar("رقم تليفون العميل:"), meta_label), Paragraph(ar(customer_phone), meta_value), Paragraph(ar("رقم الفاتورة:"), meta_label), Paragraph(ar(inv_no), meta_value)],
+            [Paragraph(ar("رقم العميل:"), meta_label), Paragraph(ar(customer_no), meta_value), Paragraph(ar("نوع الفاتورة:"), meta_label), Paragraph(ar(type_label), meta_value)],
+        ]
+        mt = Table(meta, colWidths=[30*mm, 58*mm, 28*mm, content_w-116*mm], rowHeights=[9*mm]*3)
+        mt.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),("ALIGN",(0,0),(-1,-1),"RIGHT"),("BOTTOMPADDING",(0,0),(-1,-1),2),("TOPPADDING",(0,0),(-1,-1),2),("LINEBELOW",(1,0),(1,-1),.45,colors.HexColor("#66788A")),("LINEBELOW",(3,0),(3,-1),.45,colors.HexColor("#66788A"))]))
+        story.append(mt)
+    else:
+        rows = [("اسم العميل",customer_name),("الهاتف",customer_phone),("رقم العميل",customer_no),("التاريخ",created_text),("رقم الفاتورة",inv_no),("النوع",type_label)]
+        mt = Table([[Paragraph(ar(k+":"), meta_label), Paragraph(ar(v), meta_value)] for k,v in rows], colWidths=[22*mm, content_w-22*mm])
+        mt.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),("ALIGN",(0,0),(-1,-1),"RIGHT"),("BOTTOMPADDING",(0,0),(-1,-1),1),("TOPPADDING",(0,0),(-1,-1),1)]))
+        story.append(mt)
+    story.append(Spacer(1, 4 * mm if not thermal else 2 * mm))
 
-    for page_idx, page_items in enumerate(pages_items):
-        items_data = [[ar("م"), ar("الصنف"), ar("الكمية"), ar("الوحدة"), ar("السعر"), ar("القيمة")]]
-        for i, it in enumerate(page_items, 1):
-            items_data.append([str(i), ar(it.get("product_name", "-")), f"{float(it.get('quantity', 0)):g}", ar(it.get("unit", "قطعة")), f"{float(it.get('unit_price', 0)):.2f}", f"{float(it.get('total', 0)):.2f}"])
-        for i in range(len(page_items) + 1, items_per_page + 1):
-            items_data.append(["", "", "", "", "", ""])
-        col_w = page_w - 24 * mm
-        items_table = Table(items_data, colWidths=[10 * mm, col_w * 0.38, 18 * mm, 18 * mm, 20 * mm, 20 * mm], repeatRows=1)
-        row_heights = [9 * mm] + [8 * mm] * items_per_page
-        items_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), arabic_font_bold), ("FONTSIZE", (0, 0), (-1, 0), 10),
-            ("FONTNAME", (0, 1), (-1, -1), arabic_font), ("FONTSIZE", (0, 1), (-1, -1), 9),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"), ("ALIGN", (1, 1), (1, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#c8ddef")),
-            ("ROWBACKGROUNDS", (0, 1), (-1, len(page_items)), [colors.HexColor("#EFF6FF"), colors.HexColor("#DBEAFE")]),
-            ("BACKGROUND", (0, len(page_items) + 1), (-1, -1), colors.HexColor("#F8FAFC")),
-            ("TEXTCOLOR", (0, len(page_items) + 1), (-1, -1), colors.HexColor("#9ca3af")),
-            ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2), ("ROWHEIGHTS", (0, 0), (-1, -1), 7 * mm),
-        ]))
-        items_table._rowHeights = row_heights
-        story.append(items_table)
-        is_last = page_idx == len(pages_items) - 1
-        if is_last:
-            story.append(Spacer(1, 4 * mm))
-            story.extend(_build_totals_table(invoice, arabic_font, arabic_font_bold, currency, page_w))
-            story.append(Spacer(1, 4 * mm))
-            custom_lines = settings.get("custom_lines") or ""
-            if custom_lines.strip():
-                for line in custom_lines.split("\n"):
-                    if line.strip():
-                        story.append(Paragraph(ar(line.strip()), normal_style))
-            if settings.get("footer"):
-                story.append(Spacer(1, 4 * mm))
-                story.append(Paragraph(ar(settings["footer"]), footer_style))
+    items = list(getattr(invoice, "items", None) or [])
+    per_page = max(5, int(items_per_page or 17)) if not thermal else max(12, len(items) or 12)
+    chunks = [items[i:i+per_page] for i in range(0, len(items), per_page)] or [[]]
+    currency = settings.get("currency") or "ج.م"
+    for page_index, chunk in enumerate(chunks):
+        if thermal:
+            headers = [ar("القيمة"), ar("السعر"), ar("ك"), ar("الصنف")]
+            data = [headers]
+            for it in chunk:
+                data.append([f"{_money(it.get('total')):.2f}", f"{_money(it.get('unit_price')):.2f}", f"{_money(it.get('quantity')):g}", ar(it.get("product_name") or "-")])
+            widths = [15*mm,15*mm,9*mm,content_w-39*mm]
         else:
-            from reportlab.platypus import PageBreak
+            headers = [ar("القيمة"), ar("السعر"), ar("الوحدة"), ar("الكمية"), ar("اسم الصنف"), ar("كود الصنف"), ar("م")]
+            data = [headers]
+            start_no = page_index * per_page
+            for idx, it in enumerate(chunk, start_no + 1):
+                code = it.get("code") or it.get("barcode") or (str(it.get("product_id")) if it.get("product_id") else "")
+                data.append([f"{_money(it.get('total')):.2f}", f"{_money(it.get('unit_price')):.2f}", ar(it.get("unit") or "قطعة"), f"{_money(it.get('quantity')):g}", ar(it.get("product_name") or "-"), ar(code), str(idx)])
+            while len(data) < per_page + 1:
+                data.append(["","","","","","",""])
+            widths = [24*mm,22*mm,20*mm,20*mm,content_w-116*mm,25*mm,5*mm]
+        row_heights = ([8*mm] + [7.5*mm]*(len(data)-1)) if not thermal else None
+        table = Table(data, colWidths=widths, rowHeights=row_heights, repeatRows=1)
+        style = [
+            ("BACKGROUND",(0,0),(-1,0),navy),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),bold),
+            ("FONTNAME",(0,1),(-1,-1),font),("FONTSIZE",(0,0),(-1,-1),9 if not thermal else 6.5),("ALIGN",(0,0),(-1,-1),"CENTER"),
+            ("ALIGN",(4 if not thermal else 3,1),(4 if not thermal else 3,-1),"RIGHT"),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("GRID",(0,0),(-1,-1),.65,line),
+            ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,pale]),("TOPPADDING",(0,0),(-1,-1),2),("BOTTOMPADDING",(0,0),(-1,-1),2),
+        ]
+        table.setStyle(TableStyle(style))
+        story.append(table)
+        if page_index < len(chunks)-1:
             story.append(PageBreak())
+
+    story.append(Spacer(1, 3 * mm))
+    subtotal = _display_amount(invoice, getattr(invoice, "subtotal", 0))
+    discount = abs(_money(getattr(invoice, "discount", 0)))
+    paid = _display_amount(invoice, getattr(invoice, "paid", 0))
+    remaining = _display_amount(invoice, getattr(invoice, "remaining", 0))
+    total = _display_amount(invoice, getattr(invoice, "total", 0))
+    tax = _display_amount(invoice, getattr(invoice, "tax", 0))
+    tax_rate = _money(getattr(invoice, "tax_rate", 0))
+
+    if not thermal:
+        total_bar = Table([[Paragraph(ar("الإجمالي"), ParagraphStyle("tb", fontName=bold, fontSize=13, alignment=TA_RIGHT, textColor=navy)), Paragraph(f"{subtotal:.2f} {ar(currency)}", ParagraphStyle("tv", fontName=bold, fontSize=13, alignment=TA_CENTER, textColor=navy))]], colWidths=[content_w-45*mm,45*mm], rowHeights=[13*mm])
+        total_bar.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),pale),("BOX",(0,0),(-1,-1),.8,line),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("RIGHTPADDING",(0,0),(0,0),8)]))
+        story.append(total_bar)
+        cells: list[tuple[str,float,bool]] = []
+        if discount > .004: cells.append(("الخصم", -discount, False))
+        if abs(tax) > .004: cells.append((f"الضريبة {tax_rate:g}%", tax, False))
+        if abs(paid) > .004: cells.append(("المبلغ المدفوع", paid, False))
+        if abs(remaining) > .004: cells.append(("المبلغ المتبقي", remaining, False))
+        cells.append(("المبلغ النهائي", total, True))
+        cell_w = content_w / len(cells)
+        labels = [[ar(label) for label,_,_ in cells],[f"{value:.2f}" for _,value,_ in cells]]
+        st = Table(labels, colWidths=[cell_w]*len(cells), rowHeights=[10*mm,13*mm])
+        cmds=[("FONTNAME",(0,0),(-1,0),bold),("FONTNAME",(0,1),(-1,1),bold),("FONTSIZE",(0,0),(-1,0),9),("FONTSIZE",(0,1),(-1,1),12),("ALIGN",(0,0),(-1,-1),"CENTER"),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("GRID",(0,0),(-1,-1),.65,line),("BACKGROUND",(0,0),(-1,-1),pale2)]
+        for i,(_,_,final) in enumerate(cells):
+            if final: cmds.extend([("BACKGROUND",(i,0),(i,-1),gold),("TEXTCOLOR",(i,0),(i,0),colors.white)])
+        st.setStyle(TableStyle(cmds)); story.append(st)
+        story.append(Spacer(1, 6*mm))
+        sig = Table([[Paragraph(ar("توقيع المستلم:"), meta_label), "........................................................"]], colWidths=[35*mm,content_w-35*mm])
+        sig.setStyle(TableStyle([("ALIGN",(0,0),(-1,-1),"RIGHT"),("FONTNAME",(1,0),(1,0),font),("FONTSIZE",(1,0),(1,0),10)])); story.append(sig)
+    else:
+        summary = [("الإجمالي",subtotal)]
+        if discount > .004: summary.append(("الخصم",-discount))
+        if abs(tax) > .004: summary.append(("الضريبة",tax))
+        if abs(paid) > .004: summary.append(("المدفوع",paid))
+        if abs(remaining) > .004: summary.append(("المتبقي",remaining))
+        summary.append(("النهائي",total))
+        t=Table([[Paragraph(ar(k),meta_label),f"{v:.2f} {ar(currency)}"] for k,v in summary],colWidths=[content_w*.45,content_w*.55]); t.setStyle(TableStyle([("FONTNAME",(0,0),(-1,-1),font),("ALIGN",(0,0),(-1,-1),"RIGHT"),("LINEABOVE",(0,-1),(-1,-1),.8,navy)])); story.append(t)
+
+    extra = settings.get("custom_lines") or ""
+    if extra.strip():
+        story.append(Spacer(1,3*mm))
+        for line_text in extra.splitlines():
+            if line_text.strip(): story.append(Paragraph(ar(line_text.strip()), footer_style))
+    footer = settings.get("footer") or ""
+    if footer.strip(): story.append(Spacer(1,3*mm)); story.append(Paragraph(ar(footer.strip()), footer_style))
+
     doc.build(story)
     buf.seek(0)
     return buf.getvalue()
-
-
-def _build_totals_table(invoice, arabic_font: str, arabic_font_bold: str, currency: str, page_w: float):
-    from reportlab.lib import colors
-    from reportlab.lib.units import mm
-    from reportlab.platypus import Table, TableStyle
-    discount_pct = float(invoice.discount_pct or 0)
-    discount_amt = float(invoice.discount or 0)
-    paid_amt = float(invoice.paid or 0)
-    remaining_amt = float(invoice.remaining or 0)
-    subtotal_amt = float(invoice.subtotal or 0)
-    total_amt = float(invoice.total or 0)
-    tax_rate = float(getattr(invoice, "tax_rate", 0) or 0)
-    tax_amt = float(getattr(invoice, "tax", 0) or 0)
-    if getattr(invoice, "type", None) == "return":
-        subtotal_amt = -abs(subtotal_amt)
-        total_amt = -abs(total_amt)
-    col_w = page_w - 24 * mm
-    first_row = [ar(f"الخصم\n{discount_pct:g}%"), ar(f"المبلغ المخصوم\n{discount_amt:.2f}")]
-    if tax_rate > 0 or abs(tax_amt) > 0.0001:
-        first_row.append(ar(f"الضريبة {tax_rate:g}%\n{tax_amt:.2f}"))
-    first_row.extend([ar(f"المبلغ المدفوع\n{paid_amt:.2f}"), ar(f"الباقي\n{remaining_amt:.2f}")])
-    ncols = len(first_row)
-    each = col_w / float(ncols)
-    second_row = [""] * ncols
-    second_row[0] = ar(f"الإجمالي\n{subtotal_amt:.2f} {currency}")
-    second_row[-2 if ncols > 1 else 0] = ar(f"المبلغ النهائي\n{total_amt:.2f} {currency}")
-    totals_table = Table([first_row, second_row], colWidths=[each] * ncols, rowHeights=[18 * mm, 20 * mm])
-    totals_table.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), arabic_font), ("FONTSIZE", (0, 0), (-1, 0), 9),
-        ("FONTSIZE", (0, 1), (-1, 1), 11), ("FONTNAME", (0, 1), (-1, 1), arabic_font_bold),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DBEAFE")), ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#BFDBFE")),
-        ("BACKGROUND", (2, 1), (2, 1), colors.HexColor("#FCD34D")), ("BACKGROUND", (3, 1), (3, 1), colors.HexColor("#FCD34D")),
-        ("SPAN", (0, 1), (1, 1)), ("SPAN", (2, 1), (3, 1)), ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#1e3a5f")),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    return [totals_table]
