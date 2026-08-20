@@ -85,10 +85,12 @@ from app.api.routes import auth, products, categories, suppliers, customers, inv
 from app.services.live_customizations import install_live_customizations
 from app.services.owner_customizations_v4 import install_owner_customizations_v4
 from app.services.market_readiness import install_market_readiness
+from app.services.market_pdf_tuning import install_market_pdf_tuning
 
 install_live_customizations()
 install_owner_customizations_v4()
 install_market_readiness()
+install_market_pdf_tuning()
 
 app.include_router(auth.router)
 app.include_router(products.router)
