@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 from app.services.market_readiness import (
     _archive_customer,
     _archive_product,
+    _install_invoice_accounting_guards,
     install_market_readiness,
 )
 from app.services.market_pdf_tuning import install_market_pdf_tuning
@@ -30,7 +31,6 @@ from app.db.session import Base
 from app.db.models import Customer, CustomerLedger, Invoice, Product, Setting, StockMovement
 from app.services.invoice_service import collect_payment, create_return_invoice, create_sale_invoice
 from app.services.report_service import get_profit_report
-from app.utils.helpers import r2
 
 
 def _db():
@@ -109,9 +109,10 @@ def test_discount_vat_partial_collection_return_and_delete_reconcile_exactly():
     assert profit["total_cost"] == pytest.approx(14.40)
     assert profit["profit"] == pytest.approx(10.94)
 
-    # The production route global is replaced by market_readiness. Deleting the
-    # source sale must automatically reverse/delete its return, then reverse the
-    # sale using the current remaining after collection.
+    # Some legacy tests intentionally reinstall the old live customization.
+    # Re-apply the final production guard immediately before this assertion so
+    # the test exercises the same final composition order as app.main.
+    _install_invoice_accounting_guards()
     from app.api.routes import invoices as invoice_routes
     invoice_routes.delete_sale_invoice(db, invoice_id=sale.id)
     db.flush()
