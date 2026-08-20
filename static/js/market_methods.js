@@ -184,7 +184,7 @@ export const marketMethods = {
 
       if (frame) frame.src = prepared.url;
       if (download) { download.href = prepared.url; download.download = prepared.filename; }
-      if (open) { open.href = prepared.url; open.download = ''; }
+      if (open) { open.href = prepared.url; open.removeAttribute('download'); }
       if (share) share.onclick = () => this.shareInvoicePdf(invoiceId);
 
       document.getElementById('pdfPreviewModal')?.classList.add('active');
