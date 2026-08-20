@@ -19,6 +19,7 @@ import { settingsMethods } from './js/pages/settings.js';
 import { auditMethods } from './js/pages/audit.js';
 import { quickAddMethods } from './js/pages/quick_add.js';
 import { upgradeMethods } from './js/upgrade_methods.js';
+import { marketMethods } from './js/market_methods.js';
 
 const App = {
   async init() {
@@ -199,6 +200,7 @@ const App = {
   ...posMethods, ...productMethods, ...supplierMethods, ...customerMethods, ...invoiceMethods,
   ...reportMethods, ...userMethods, ...settingsMethods, ...auditMethods, ...quickAddMethods,
   ...upgradeMethods,
+  ...marketMethods,
 };
 
 setUnauthorizedHandler(() => { App.showLogin(); App.toast('انتهت الجلسة، سجل دخول مرة أخرى', 'warning'); });

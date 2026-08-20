@@ -26,7 +26,7 @@ jobs:
       - name: Check JavaScript syntax
         run: |
           node --check static/app.js
-          for f in static/js/core/*.js static/js/pages/*.js; do node --check "$f"; done
+          for f in static/js/*.js static/js/core/*.js static/js/pages/*.js; do node --check "$f"; done
       - name: Run tests
         env:
           TERM: xterm
