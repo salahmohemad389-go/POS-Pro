@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request, Response as FastAPIResponse
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -24,12 +24,22 @@ async def root():
     """Serve the UI and same-origin startup helpers before app.js."""
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     if '</head>' in html:
-        html = html.replace('</head>', '<link rel="stylesheet" href="/static/css/upgrade.css">\n</head>', 1)
+        extras = (
+            '<link rel="stylesheet" href="/static/css/upgrade.css">\n'
+            '<link rel="manifest" href="/manifest.webmanifest">\n'
+            '<link rel="icon" href="/app-icon">\n'
+            '<link rel="apple-touch-icon" href="/app-icon">\n'
+            '<meta name="application-name" content="POS">\n'
+            '<meta name="apple-mobile-web-app-capable" content="yes">\n'
+            '<meta name="apple-mobile-web-app-status-bar-style" content="default">\n'
+        )
+        html = html.replace('</head>', extras + '</head>', 1)
     marker = '<script type="module" src="/static/app.js"></script>'
     shell = (
         '<script src="/static/client_diag.js" defer></script>\n'
         '<script src="/static/js/upgrade_dom.js"></script>\n'
         '<script src="/static/js/final_ui_patch.js"></script>\n'
+        '<script src="/static/js/owner_ui_v4.js"></script>\n'
         + marker
     )
     if marker in html:
@@ -73,12 +83,8 @@ async def client_error(request: Request):
 
 @router.get("/favicon.ico")
 async def favicon():
-    for name in ("favicon.ico", "favicon.png"):
-        path = STATIC_DIR / name
-        if path.exists():
-            return FileResponse(str(path))
-    png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
-    return Response(content=base64.b64decode(png_b64), media_type="image/png")
+    # Browsers that still probe /favicon.ico should use the same dynamic store icon.
+    return RedirectResponse(url="/app-icon", status_code=307)
 
 
 @router.get("/api/health", include_in_schema=False)
