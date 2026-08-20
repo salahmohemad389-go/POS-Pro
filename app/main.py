@@ -70,7 +70,9 @@ async def security_headers(request, call_next):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
-    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    # Camera is allowed only for this same origin so the POS barcode fallback can
+    # request the rear camera. Microphone and geolocation stay blocked.
+    response.headers.setdefault("Permissions-Policy", "camera=(self), microphone=(), geolocation=()")
     response.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
