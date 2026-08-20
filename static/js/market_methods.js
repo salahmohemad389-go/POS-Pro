@@ -3,6 +3,7 @@ import { S } from './core/state.js';
 import { API } from './core/api.js';
 import { Util } from './core/util.js';
 import { upgradeMethods } from './upgrade_methods.js';
+import './barcode_ux.js';
 
 const has = permission => !!(S.user?.permissions || []).includes(permission);
 
@@ -36,6 +37,31 @@ if (document.readyState === 'loading') {
 }
 
 export const marketMethods = {
+  setQtyToActive(delta) {
+    if (!S.cart.length) return;
+    const last = S.cart[S.cart.length - 1];
+    const inc = Util.r3(delta);
+    if (inc <= 0) return;
+
+    const current = Util.r3(parseFloat(last.quantity) || 0);
+    let target = Util.r3(current + inc);
+    const product = S.productCache.get(last.product_id);
+    const stock = product ? (parseFloat(product.stock) || 0) : Infinity;
+
+    if (S.invoiceType === 'sale' && target > stock + 0.0000001) {
+      if (stock <= current + 0.0000001) {
+        this.toast(`وصلت للكمية المتاحة في المخزون (${Util.r3(stock)})`, 'warning');
+        return;
+      }
+      target = Util.r3(stock);
+      this.toast(`المتاح فقط ${target} وتمت الزيادة حتى حد المخزون`, 'warning');
+    }
+
+    last.quantity = target;
+    last.total = Util.r2(last.quantity * last.unit_price);
+    this.renderCart();
+  },
+
   async viewCustomer(id) {
     await upgradeMethods.viewCustomer.call(this, id);
 
