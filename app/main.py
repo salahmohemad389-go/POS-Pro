@@ -82,6 +82,9 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Register all route routers
 from app.api.routes import auth, products, categories, suppliers, customers, invoices, combined, users, audit, settings, backup, reports, misc
+from app.services.live_customizations import install_live_customizations
+
+install_live_customizations()
 
 app.include_router(auth.router)
 app.include_router(products.router)
