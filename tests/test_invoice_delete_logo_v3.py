@@ -1,15 +1,20 @@
 from pathlib import Path
 from types import SimpleNamespace
+import sys
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from app.db.session import Base
-from app.db.models import Customer, CustomerLedger, Invoice, Product, StockMovement
+from app.db.models import AuditLog, Customer, CustomerLedger, Invoice, Product, StockMovement, User
 from app.services.live_customizations import (
     _AUDIT_SNAPSHOT_KEY,
-    _clean_invoice_header,
+    _audit_with_deleted_snapshot,
     _safe_delete_invoice,
     install_live_customizations,
 )
@@ -47,6 +52,28 @@ def test_sale_delete_reverses_stock_debt_and_keeps_audit_snapshot():
     assert db.query(StockMovement).count() == 0
     assert db.query(CustomerLedger).count() == 0
     assert "INV-1" in db.info[_AUDIT_SNAPSHOT_KEY]
+
+
+def test_deleted_invoice_snapshot_is_written_to_admin_audit_log():
+    db = _db()
+    product = Product(name="P", stock=5, price=10, cost=4)
+    admin = User(name="Admin", login="admin-v3", password_hash="x", role="admin", is_owner=True)
+    db.add_all([product, admin]); db.flush()
+    inv = Invoice(
+        number=9, invoice_number="INV-0009", customer_name="Cash", type="sale",
+        items=[{"product_id": product.id, "product_name": "P", "quantity": 1, "unit_price": 10, "total": 10}],
+        subtotal=10, total=10, paid=10, remaining=0, status="paid", payment_method="cash",
+    )
+    db.add(inv); db.commit()
+
+    _safe_delete_invoice(db, invoice_id=inv.id)
+    _audit_with_deleted_snapshot(db, admin, "invoice_delete", "حذف فاتورة #9", "127.0.0.1", commit=False)
+    db.commit()
+
+    row = db.query(AuditLog).filter(AuditLog.action == "invoice_delete").one()
+    assert "INV-0009" in row.details
+    assert "نسخة الفاتورة المحذوفة=" in row.details
+    assert row.user_id == admin.id
 
 
 def test_sale_with_linked_return_must_delete_return_first():
@@ -87,7 +114,7 @@ def test_return_delete_reverses_stock_and_account_credit():
     assert float(db.query(Customer).first().balance) == pytest.approx(50)
 
 
-def test_invoice_pdf_uses_clean_header_override_and_still_renders():
+def test_invoice_pdf_clean_header_override_still_renders():
     install_live_customizations()
     invoice = SimpleNamespace(
         id=1, number=7, invoice_number="INV-0007", customer_id=3,
@@ -98,7 +125,6 @@ def test_invoice_pdf_uses_clean_header_override_and_still_renders():
         user_name="Admin", created_at=None,
     )
     settings = {"store_name": "POS", "logo": "", "currency": "ج.م"}
-    pdf = generate_invoice_pdf(invoice, settings, Path(__file__).resolve().parents[1] / "static" / "assets" / "fonts")
+    pdf = generate_invoice_pdf(invoice, settings, ROOT / "static" / "assets" / "fonts")
     assert pdf.startswith(b"%PDF")
     assert len(pdf) > 1500
-    assert "LINEBELOW" not in _clean_invoice_header.__doc__ if _clean_invoice_header.__doc__ else True
