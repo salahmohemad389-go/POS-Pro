@@ -60,7 +60,18 @@ with TestClient(app) as c:
     assert db.query(CustomerLedger).filter(CustomerLedger.customer_id == cust.id, CustomerLedger.movement_type == 'opening').count() == 1
     imported_cust_id = cust.id
     db.close()
-    expect(c.delete(f'/api/customers/{imported_cust_id}'), 409, 'customer ledger delete block')
+
+    # Deleting a customer with financial history now archives the customer while
+    # preserving the ledger and balance instead of destroying accounting history.
+    deleted = expect(c.delete(f'/api/customers/{imported_cust_id}'), 200, 'customer archive delete').json()
+    assert deleted['archived'] is True and deleted['financial_history_preserved'] is True, deleted
+    db = SessionLocal()
+    archived = db.query(Customer).filter(Customer.id == imported_cust_id).first()
+    assert archived is not None and archived.active is False and float(archived.balance) == 25.5
+    assert db.query(CustomerLedger).filter(CustomerLedger.customer_id == imported_cust_id, CustomerLedger.movement_type == 'opening').count() == 1
+    db.close()
+    listed = expect(c.get('/api/customers?q=Imported%20Customer'), 200, 'archived customer hidden').json()
+    assert listed['total'] == 0, listed
 
     # Backup path validation and actual local backup/download.
     expect(c.post('/api/backup/restore', json={'name':'../backup_evil.zip'}), 422, 'restore traversal')
