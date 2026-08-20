@@ -81,10 +81,12 @@ async def security_headers(request, call_next):
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Register all route routers
-from app.api.routes import auth, products, categories, suppliers, customers, invoices, combined, users, audit, settings, backup, reports, misc
+from app.api.routes import auth, products, categories, suppliers, customers, invoices, combined, users, audit, settings, backup, reports, misc, customization_v4
 from app.services.live_customizations import install_live_customizations
+from app.services.owner_customizations_v4 import install_owner_customizations_v4
 
 install_live_customizations()
+install_owner_customizations_v4()
 
 app.include_router(auth.router)
 app.include_router(products.router)
@@ -98,4 +100,5 @@ app.include_router(audit.router)
 app.include_router(settings.router)
 app.include_router(backup.router)
 app.include_router(reports.router)
+app.include_router(customization_v4.router)
 app.include_router(misc.router)
